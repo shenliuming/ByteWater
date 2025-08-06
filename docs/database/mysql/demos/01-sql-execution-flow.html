@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MySQL SQL执行流程动画演示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 40px;
+            max-width: 1200px;
+            width: 100%;
+        }
+
+        .controls {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .flow-container {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+        }
+
+        .step {
+            display: flex;
+            align-items: center;
+            padding: 20px;
+            border-radius: 15px;
+            background: #f8f9fa;
+            border-left: 5px solid #667eea;
+            opacity: 0.3;
+            transition: all 0.5s ease;
+            transform: translateX(-20px);
+        }
+
+        .step.active {
+            opacity: 1;
+            transform: translateX(0);
+            background: linear-gradient(135deg, #667eea10, #764ba210);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .step-number {
+            background: #667eea;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 20px;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            color: #333;
+            margin-bottom: 8px;
+        }
+
+        .step-description {
+            color: #666;
+            line-height: 1.6;
+        }
+
+        .step-detail {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 10px;
+            margin-top: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            display: none;
+        }
+
+        .step.active .step-detail {
+            display: block;
+            animation: slideDown 0.3s ease;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                max-height: 0;
+            }
+            to {
+                opacity: 1;
+                max-height: 200px;
+            }
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: #e9ecef;
+            border-radius: 3px;
+            margin-bottom: 30px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            width: 0%;
+            transition: width 0.5s ease;
+            border-radius: 3px;
+        }
+
+        .sql-query {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            margin-bottom: 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .sql-query::before {
+            content: 'SQL';
+            position: absolute;
+            top: 5px;
+            right: 10px;
+            background: #667eea;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+        }
+
+        .highlight {
+            background: #ffd700;
+            color: #333;
+            padding: 2px 4px;
+            border-radius: 3px;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        .architecture-diagram {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin: 20px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 10px;
+        }
+
+        .component {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            text-align: center;
+            min-width: 120px;
+            transition: all 0.3s ease;
+        }
+
+        .component.active {
+            background: #667eea;
+            color: white;
+            transform: scale(1.05);
+        }
+
+        .arrow {
+            font-size: 2em;
+            color: #667eea;
+            animation: bounce 1s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 100% { transform: translateX(0); }
+            50% { transform: translateX(5px); }
+        }
+
+        .footer {
+            margin-top: 30px;
+            text-align: center;
+            color: white;
+            opacity: 0.8;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            
+            .architecture-diagram {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .arrow {
+                transform: rotate(90deg);
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🚀 MySQL SQL执行流程</h1>
+        <p>深入理解一条SQL语句的完整执行旅程</p>
+    </div>
+
+    <div class="container">
+        <div class="sql-query">
+            <div>SELECT * FROM users WHERE id = <span class="highlight">1</span>;</div>
+        </div>
+
+        <div class="controls">
+            <button class="btn" onclick="startAnimation()">开始演示</button>
+            <button class="btn" onclick="pauseAnimation()">暂停</button>
+            <button class="btn" onclick="resetAnimation()">重置</button>
+            <button class="btn" onclick="nextStep()">下一步</button>
+        </div>
+
+        <div class="progress-bar">
+            <div class="progress-fill" id="progressFill"></div>
+        </div>
+
+        <div class="architecture-diagram">
+            <div class="component" id="client">客户端</div>
+            <div class="arrow">→</div>
+            <div class="component" id="connection">连接层</div>
+            <div class="arrow">→</div>
+            <div class="component" id="parser">解析器</div>
+            <div class="arrow">→</div>
+            <div class="component" id="optimizer">优化器</div>
+            <div class="arrow">→</div>
+            <div class="component" id="executor">执行器</div>
+            <div class="arrow">→</div>
+            <div class="component" id="storage">存储引擎</div>
+        </div>
+
+        <div class="flow-container">
+            <div class="step" data-step="1" data-component="client">
+                <div class="step-number">1</div>
+                <div class="step-content">
+                    <div class="step-title">客户端发起连接</div>
+                    <div class="step-description">Java应用通过JDBC驱动建立与MySQL服务器的TCP连接</div>
+                    <div class="step-detail">
+// Java代码示例
+Connection conn = DriverManager.getConnection(
+    "jdbc:mysql://localhost:3306/test", 
+    "root", "password"
+);
+                    </div>
+                </div>
+            </div>
+
+            <div class="step" data-step="2" data-component="connection">
+                <div class="step-number">2</div>
+                <div class="step-content">
+                    <div class="step-title">连接层处理</div>
+                    <div class="step-description">MySQL连接器验证用户身份，分配连接线程，管理连接状态</div>
+                    <div class="step-detail">
+-- 查看当前连接
+SHOW PROCESSLIST;
+-- 连接数统计
+SHOW STATUS LIKE 'Connections';
+                    </div>
+                </div>
+            </div>
+
+            <div class="step" data-step="3" data-component="parser">
+                <div class="step-number">3</div>
+                <div class="step-content">
+                    <div class="step-title">SQL解析</div>
+                    <div class="step-description">词法分析识别关键字，语法分析构建解析树，语义分析验证权限</div>
+                    <div class="step-detail">
+词法分析: [SELECT] [*] [FROM] [users] [WHERE] [id] [=] [1]
+语法树: SELECT -> (*, FROM users, WHERE id=1)
+语义检查: 表存在性、列存在性、权限验证
+                    </div>
+                </div>
+            </div>
+
+            <div class="step" data-step="4" data-component="optimizer">
+                <div class="step-number">4</div>
+                <div class="step-content">
+                    <div class="step-title">查询优化</div>
+                    <div class="step-description">基于成本模型选择最优执行计划，决定是否使用索引</div>
+                    <div class="step-detail">
+-- 查看执行计划
+EXPLAIN SELECT * FROM users WHERE id = 1;
+-- 成本分析
+SHOW STATUS LIKE 'Last_query_cost';
+                    </div>
+                </div>
+            </div>
+
+            <div class="step" data-step="5" data-component="executor">
+                <div class="step-number">5</div>
+                <div class="step-content">
+                    <div class="step-title">执行器调用</div>
+                    <div class="step-description">根据执行计划调用存储引擎接口，获取数据</div>
+                    <div class="step-detail">
+执行计划: 使用主键索引查找
+调用接口: handler->index_read_map()
+返回结果: 1行数据
+                    </div>
+                </div>
+            </div>
+
+            <div class="step" data-step="6" data-component="storage">
+                <div class="step-number">6</div>
+                <div class="step-content">
+                    <div class="step-title">存储引擎处理</div>
+                    <div class="step-description">InnoDB引擎在Buffer Pool中查找页面，如未命中则从磁盘读取</div>
+                    <div class="step-detail">
+1. 检查Buffer Pool缓存
+2. 如果缓存未命中，从磁盘读取页面
+3. 在页面中定位记录
+4. 返回结果给执行器
+                    </div>
+                </div>
+            </div>
+
+            <div class="step" data-step="7" data-component="client">
+                <div class="step-number">7</div>
+                <div class="step-content">
+                    <div class="step-title">返回结果</div>
+                    <div class="step-description">查询结果通过网络返回给客户端应用程序</div>
+                    <div class="step-detail">
+// Java接收结果
+ResultSet rs = stmt.executeQuery("SELECT * FROM users WHERE id = 1");
+while(rs.next()) {
+    System.out.println(rs.getString("name"));
+}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="footer">
+        <p>💡 提示：点击"开始演示"观看完整流程，或使用"下一步"逐步学习</p>
+    </div>
+
+    <script>
+        let currentStep = 0;
+        let isAnimating = false;
+        let animationInterval;
+
+        const steps = document.querySelectorAll('.step');
+        const components = document.querySelectorAll('.component');
+        const progressFill = document.getElementById('progressFill');
+
+        function updateProgress() {
+            const progress = (currentStep / steps.length) * 100;
+            progressFill.style.width = progress + '%';
+        }
+
+        function activateStep(stepIndex) {
+            // 重置所有步骤和组件
+            steps.forEach(step => step.classList.remove('active'));
+            components.forEach(comp => comp.classList.remove('active'));
+
+            if (stepIndex < steps.length) {
+                // 激活当前步骤
+                steps[stepIndex].classList.add('active');
+                
+                // 激活对应组件
+                const componentId = steps[stepIndex].getAttribute('data-component');
+                const component = document.getElementById(componentId);
+                if (component) {
+                    component.classList.add('active');
+                }
+            }
+
+            updateProgress();
+        }
+
+        function startAnimation() {
+            if (isAnimating) return;
+            
+            isAnimating = true;
+            currentStep = 0;
+            
+            animationInterval = setInterval(() => {
+                activateStep(currentStep);
+                currentStep++;
+                
+                if (currentStep >= steps.length) {
+                    clearInterval(animationInterval);
+                    isAnimating = false;
+                    currentStep = steps.length;
+                }
+            }, 2000);
+        }
+
+        function pauseAnimation() {
+            if (animationInterval) {
+                clearInterval(animationInterval);
+                isAnimating = false;
+            }
+        }
+
+        function resetAnimation() {
+            pauseAnimation();
+            currentStep = 0;
+            steps.forEach(step => step.classList.remove('active'));
+            components.forEach(comp => comp.classList.remove('active'));
+            updateProgress();
+        }
+
+        function nextStep() {
+            pauseAnimation();
+            if (currentStep < steps.length) {
+                activateStep(currentStep);
+                currentStep++;
+            }
+        }
+
+        // 初始化
+        updateProgress();
+    </script>
+</body>
+</html>

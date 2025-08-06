@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MySQL事务日志系统动画演示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 40px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .controls {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+
+        .transaction-area {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .sql-panel {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 15px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .sql-title {
+            color: #4facfe;
+            font-size: 1.2em;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .sql-statement {
+            background: #1a202c;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .logs-container {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .log-panel {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            border: 2px solid #ddd;
+            min-height: 300px;
+        }
+
+        .log-panel.undo {
+            border-color: #ff6b6b;
+        }
+
+        .log-panel.redo {
+            border-color: #4ecdc4;
+        }
+
+        .log-panel.binlog {
+            border-color: #ffe66d;
+        }
+
+        .log-title {
+            font-size: 1.3em;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 15px;
+            padding: 10px;
+            border-radius: 8px;
+            color: white;
+        }
+
+        .log-title.undo {
+            background: #ff6b6b;
+        }
+
+        .log-title.redo {
+            background: #4ecdc4;
+        }
+
+        .log-title.binlog {
+            background: #ffe66d;
+            color: #333;
+        }
+
+        .log-entries {
+            max-height: 250px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            background: white;
+            padding: 10px;
+            margin-bottom: 8px;
+            border-radius: 8px;
+            border-left: 4px solid #ddd;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            opacity: 0;
+            transform: translateY(20px);
+            animation: slideIn 0.5s ease forwards;
+        }
+
+        .log-entry.undo {
+            border-left-color: #ff6b6b;
+        }
+
+        .log-entry.redo {
+            border-left-color: #4ecdc4;
+        }
+
+        .log-entry.binlog {
+            border-left-color: #ffe66d;
+        }
+
+        @keyframes slideIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .timeline {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 15px;
+            margin-bottom: 30px;
+        }
+
+        .timeline-title {
+            text-align: center;
+            font-size: 1.3em;
+            font-weight: bold;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .timeline-steps {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            position: relative;
+        }
+
+        .timeline-step {
+            background: white;
+            border: 3px solid #ddd;
+            border-radius: 50%;
+            width: 60px;
+            height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            position: relative;
+            z-index: 2;
+            transition: all 0.3s ease;
+        }
+
+        .timeline-step.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+            transform: scale(1.1);
+        }
+
+        .timeline-step.completed {
+            background: #00b894;
+            color: white;
+            border-color: #00b894;
+        }
+
+        .timeline-line {
+            position: absolute;
+            top: 50%;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: #ddd;
+            z-index: 1;
+        }
+
+        .timeline-progress {
+            height: 100%;
+            background: #667eea;
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
+        .step-label {
+            position: absolute;
+            top: 70px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 0.8em;
+            text-align: center;
+            width: 80px;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .two-phase-commit {
+            background: #e8f4fd;
+            border: 2px solid #4facfe;
+            border-radius: 15px;
+            padding: 30px;
+            margin-bottom: 20px;
+        }
+
+        .commit-flow {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            margin-bottom: 30px;
+        }
+
+        .commit-step {
+            display: flex;
+            align-items: center;
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 15px;
+            padding: 20px;
+            margin: 10px 0;
+            width: 100%;
+            max-width: 500px;
+            transition: all 0.3s ease;
+        }
+
+        .commit-step.active {
+            border-color: #4facfe;
+            background: #f0f8ff;
+            transform: scale(1.02);
+            box-shadow: 0 5px 15px rgba(79, 172, 254, 0.3);
+        }
+
+        .commit-step.completed {
+            border-color: #4caf50;
+            background: #e8f5e8;
+        }
+
+        .step-number {
+            background: #4facfe;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 1.2em;
+            margin-right: 20px;
+            flex-shrink: 0;
+        }
+
+        .step-content {
+            flex: 1;
+        }
+
+        .step-content h4 {
+            margin: 0 0 5px 0;
+            color: #333;
+        }
+
+        .step-content p {
+            margin: 0 0 10px 0;
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .step-status {
+            padding: 5px 10px;
+            border-radius: 15px;
+            font-size: 0.8em;
+            font-weight: bold;
+            background: #f5f5f5;
+            color: #666;
+            display: inline-block;
+        }
+
+        .step-status.executing {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .step-status.completed {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .step-status.failed {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .commit-arrow {
+            font-size: 2em;
+            color: #4facfe;
+            margin: 10px 0;
+            animation: arrowPulse 2s infinite;
+        }
+
+        @keyframes arrowPulse {
+            0%, 100% { opacity: 0.5; transform: scale(1); }
+            50% { opacity: 1; transform: scale(1.1); }
+        }
+
+        .crash-scenarios {
+            margin-top: 30px;
+        }
+
+        .crash-scenarios h4 {
+            text-align: center;
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .scenario-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+        }
+
+        .scenario-card {
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            padding: 15px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .scenario-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        }
+
+        .scenario-card h5 {
+            margin: 0 0 10px 0;
+            color: #333;
+        }
+
+        .scenario-card p {
+            margin: 0 0 15px 0;
+            color: #666;
+            font-size: 0.9em;
+        }
+
+        .scenario-result {
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+
+        .scenario-result.commit {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .scenario-result.rollback {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        @media (max-width: 768px) {
+            .transaction-area {
+                grid-template-columns: 1fr;
+            }
+            
+            .logs-container {
+                grid-template-columns: 1fr;
+            }
+            
+            .timeline-steps {
+                flex-direction: column;
+                gap: 20px;
+            }
+            
+            .timeline-line {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>📝 MySQL事务日志系统</h1>
+        <p>深入理解Undo Log、Redo Log、Binlog的协同工作机制</p>
+    </div>
+
+    <div class="container">
+        <div class="controls">
+            <button class="btn" onclick="startTransaction()">开始事务演示</button>
+            <button class="btn" onclick="simulateUpdate()">模拟UPDATE操作</button>
+            <button class="btn" onclick="simulateCrash()">模拟系统崩溃</button>
+            <button class="btn" onclick="resetDemo()">重置演示</button>
+        </div>
+
+        <div class="transaction-area">
+            <div class="sql-panel">
+                <div class="sql-title">当前执行的SQL</div>
+                <div id="currentSQL">
+                    <div class="sql-statement">等待事务开始...</div>
+                </div>
+            </div>
+            
+            <div class="sql-panel">
+                <div class="sql-title">事务状态</div>
+                <div id="transactionStatus">
+                    <div class="sql-statement">状态: 未开始</div>
+                    <div class="sql-statement">事务ID: -</div>
+                    <div class="sql-statement">LSN: -</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="timeline">
+            <div class="timeline-title">事务执行时间线</div>
+            <div class="timeline-steps">
+                <div class="timeline-line">
+                    <div class="timeline-progress" id="timelineProgress"></div>
+                </div>
+                <div class="timeline-step" id="step1">
+                    1
+                    <div class="step-label">开始事务</div>
+                </div>
+                <div class="timeline-step" id="step2">
+                    2
+                    <div class="step-label">写Undo Log</div>
+                </div>
+                <div class="timeline-step" id="step3">
+                    3
+                    <div class="step-label">修改数据页</div>
+                </div>
+                <div class="timeline-step" id="step4">
+                    4
+                    <div class="step-label">写Redo Log</div>
+                </div>
+                <div class="timeline-step" id="step5">
+                    5
+                    <div class="step-label">Prepare阶段</div>
+                </div>
+                <div class="timeline-step" id="step6">
+                    6
+                    <div class="step-label">写Binlog</div>
+                </div>
+                <div class="timeline-step" id="step7">
+                    7
+                    <div class="step-label">Commit阶段</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="logs-container">
+            <div class="log-panel undo">
+                <div class="log-title undo">Undo Log (回滚日志)</div>
+                <div class="log-entries" id="undoLog">
+                    <div style="text-align: center; color: #666; margin-top: 50px;">
+                        等待事务操作...
+                    </div>
+                </div>
+            </div>
+
+            <div class="log-panel redo">
+                <div class="log-title redo">Redo Log (重做日志)</div>
+                <div class="log-entries" id="redoLog">
+                    <div style="text-align: center; color: #666; margin-top: 50px;">
+                        等待事务操作...
+                    </div>
+                </div>
+            </div>
+
+            <div class="log-panel binlog">
+                <div class="log-title binlog">Binlog (二进制日志)</div>
+                <div class="log-entries" id="binlog">
+                    <div style="text-align: center; color: #666; margin-top: 50px;">
+                        等待事务操作...
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="two-phase-commit" id="twoPhaseCommit">
+            <h3>两阶段提交协议详细流程</h3>
+            <div class="commit-flow">
+                <div class="commit-step" id="commitStep1">
+                    <div class="step-number">1</div>
+                    <div class="step-content">
+                        <h4>写入Redo Log</h4>
+                        <p>记录数据变更，状态为prepare</p>
+                        <div class="step-status" id="step1Status">等待执行</div>
+                    </div>
+                </div>
+                <div class="commit-arrow">⬇️</div>
+                <div class="commit-step" id="commitStep2">
+                    <div class="step-number">2</div>
+                    <div class="step-content">
+                        <h4>写入Binlog</h4>
+                        <p>记录完整的SQL语句</p>
+                        <div class="step-status" id="step2Status">等待执行</div>
+                    </div>
+                </div>
+                <div class="commit-arrow">⬇️</div>
+                <div class="commit-step" id="commitStep3">
+                    <div class="step-number">3</div>
+                    <div class="step-content">
+                        <h4>提交Redo Log</h4>
+                        <p>将prepare状态改为commit</p>
+                        <div class="step-status" id="step3Status">等待执行</div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="crash-scenarios">
+                <h4>崩溃场景分析</h4>
+                <div class="scenario-grid">
+                    <div class="scenario-card" id="scenario1">
+                        <h5>场景1: Redo Log写入后崩溃</h5>
+                        <p>Binlog未写入，事务回滚</p>
+                        <div class="scenario-result rollback">回滚</div>
+                    </div>
+                    <div class="scenario-card" id="scenario2">
+                        <h5>场景2: Binlog写入后崩溃</h5>
+                        <p>Redo Log为prepare，事务提交</p>
+                        <div class="scenario-result commit">提交</div>
+                    </div>
+                    <div class="scenario-card" id="scenario3">
+                        <h5>场景3: 完全提交后崩溃</h5>
+                        <p>事务已完成，数据一致</p>
+                        <div class="scenario-result commit">已提交</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="transactionCount">0</div>
+                <div class="stat-label">已执行事务数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="undoLogSize">0</div>
+                <div class="stat-label">Undo Log条目</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="redoLogSize">0</div>
+                <div class="stat-label">Redo Log条目</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="binlogSize">0</div>
+                <div class="stat-label">Binlog条目</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class TransactionLogDemo {
+            constructor() {
+                this.transactionId = 0;
+                this.lsn = 1000;
+                this.undoLogEntries = 0;
+                this.redoLogEntries = 0;
+                this.binlogEntries = 0;
+                this.currentStep = 0;
+                this.isRunning = false;
+            }
+
+            reset() {
+                this.transactionId = 0;
+                this.lsn = 1000;
+                this.undoLogEntries = 0;
+                this.redoLogEntries = 0;
+                this.binlogEntries = 0;
+                this.currentStep = 0;
+                this.isRunning = false;
+
+                // 清空日志
+                document.getElementById('undoLog').innerHTML = '<div style="text-align: center; color: #666; margin-top: 50px;">等待事务操作...</div>';
+                document.getElementById('redoLog').innerHTML = '<div style="text-align: center; color: #666; margin-top: 50px;">等待事务操作...</div>';
+                document.getElementById('binlog').innerHTML = '<div style="text-align: center; color: #666; margin-top: 50px;">等待事务操作...</div>';
+
+                // 重置状态
+                document.getElementById('currentSQL').innerHTML = '<div class="sql-statement">等待事务开始...</div>';
+                document.getElementById('transactionStatus').innerHTML = `
+                    <div class="sql-statement">状态: 未开始</div>
+                    <div class="sql-statement">事务ID: -</div>
+                    <div class="sql-statement">LSN: -</div>
+                `;
+
+                // 重置时间线
+                for (let i = 1; i <= 7; i++) {
+                    const step = document.getElementById(`step${i}`);
+                    step.className = 'timeline-step';
+                }
+                document.getElementById('timelineProgress').style.width = '0%';
+
+                // 重置两阶段提交步骤
+                for (let i = 1; i <= 3; i++) {
+                    const step = document.getElementById(`commitStep${i}`);
+                    const status = document.getElementById(`step${i}Status`);
+                    if (step) {
+                        step.className = 'commit-step';
+                    }
+                    if (status) {
+                        status.textContent = '等待执行';
+                        status.className = 'step-status';
+                    }
+                }
+
+                this.updateStats();
+            }
+
+            async startTransaction() {
+                if (this.isRunning) return;
+                this.isRunning = true;
+
+                this.transactionId++;
+                this.updateTransactionStatus('运行中');
+
+                // 步骤1: 开始事务
+                await this.executeStep(1, 'BEGIN;', '开始事务');
+
+                // 步骤2: 写Undo Log
+                await this.executeStep(2, 'UPDATE users SET balance = 1500 WHERE id = 1;', '写入Undo Log');
+                this.addUndoLogEntry('TRX_ID: ' + this.transactionId, 'users.id=1', 'balance: 1000 -> 1500');
+
+                // 步骤3: 修改数据页
+                await this.executeStep(3, null, '修改Buffer Pool中的数据页');
+
+                // 步骤4: 写Redo Log
+                await this.executeStep(4, null, '写入Redo Log');
+                this.addRedoLogEntry('LSN: ' + this.lsn++, 'PAGE_ID: 100', 'users.id=1 balance=1500');
+
+                // 步骤5: Prepare阶段
+                await this.executeStep(5, null, 'Prepare阶段');
+                await this.simulateTwoPhaseCommit();
+
+                // 步骤6: 写Binlog
+                await this.executeStep(6, null, '写入Binlog');
+                this.addBinlogEntry('POS: ' + (this.binlogEntries * 100 + 1000), 'UPDATE users SET balance=1500 WHERE id=1', 'TRX_ID: ' + this.transactionId);
+
+                // 步骤7: Commit阶段
+                await this.executeStep(7, 'COMMIT;', 'Commit阶段');
+
+                this.updateTransactionStatus('已提交');
+                this.isRunning = false;
+            }
+
+            async executeStep(stepNum, sql, description) {
+                // 激活当前步骤
+                const step = document.getElementById(`step${stepNum}`);
+                step.classList.add('active');
+
+                // 更新进度条
+                const progress = (stepNum / 7) * 100;
+                document.getElementById('timelineProgress').style.width = progress + '%';
+
+                // 更新SQL显示
+                if (sql) {
+                    document.getElementById('currentSQL').innerHTML = `<div class="sql-statement">${sql}</div>`;
+                } else {
+                    document.getElementById('currentSQL').innerHTML = `<div class="sql-statement">${description}</div>`;
+                }
+
+                await this.sleep(1500);
+
+                // 标记为完成
+                step.classList.remove('active');
+                step.classList.add('completed');
+            }
+
+            addUndoLogEntry(trxId, table, change) {
+                const container = document.getElementById('undoLog');
+                if (this.undoLogEntries === 0) {
+                    container.innerHTML = '';
+                }
+
+                const entry = document.createElement('div');
+                entry.className = 'log-entry undo';
+                entry.innerHTML = `
+                    <div><strong>${trxId}</strong></div>
+                    <div>表: ${table}</div>
+                    <div>变更: ${change}</div>
+                    <div>时间: ${new Date().toLocaleTimeString()}</div>
+                `;
+                container.appendChild(entry);
+                this.undoLogEntries++;
+                this.updateStats();
+            }
+
+            addRedoLogEntry(lsn, pageId, change) {
+                const container = document.getElementById('redoLog');
+                if (this.redoLogEntries === 0) {
+                    container.innerHTML = '';
+                }
+
+                const entry = document.createElement('div');
+                entry.className = 'log-entry redo';
+                entry.innerHTML = `
+                    <div><strong>${lsn}</strong></div>
+                    <div>${pageId}</div>
+                    <div>变更: ${change}</div>
+                    <div>时间: ${new Date().toLocaleTimeString()}</div>
+                `;
+                container.appendChild(entry);
+                this.redoLogEntries++;
+                this.updateStats();
+            }
+
+            addBinlogEntry(position, sql, trxId) {
+                const container = document.getElementById('binlog');
+                if (this.binlogEntries === 0) {
+                    container.innerHTML = '';
+                }
+
+                const entry = document.createElement('div');
+                entry.className = 'log-entry binlog';
+                entry.innerHTML = `
+                    <div><strong>${position}</strong></div>
+                    <div>SQL: ${sql}</div>
+                    <div>${trxId}</div>
+                    <div>时间: ${new Date().toLocaleTimeString()}</div>
+                `;
+                container.appendChild(entry);
+                this.binlogEntries++;
+                this.updateStats();
+            }
+
+            updateTransactionStatus(status) {
+                document.getElementById('transactionStatus').innerHTML = `
+                    <div class="sql-statement">状态: ${status}</div>
+                    <div class="sql-statement">事务ID: ${this.transactionId}</div>
+                    <div class="sql-statement">LSN: ${this.lsn}</div>
+                `;
+            }
+
+            updateStats() {
+                document.getElementById('transactionCount').textContent = this.transactionId;
+                document.getElementById('undoLogSize').textContent = this.undoLogEntries;
+                document.getElementById('redoLogSize').textContent = this.redoLogEntries;
+                document.getElementById('binlogSize').textContent = this.binlogEntries;
+            }
+
+            async simulateUpdate() {
+                if (this.isRunning) return;
+                
+                // 快速执行多个更新操作
+                for (let i = 0; i < 3; i++) {
+                    await this.startTransaction();
+                    await this.sleep(500);
+                }
+            }
+
+            simulateCrash() {
+                if (!this.isRunning) {
+                    alert('请先开始一个事务，然后在执行过程中模拟崩溃');
+                    return;
+                }
+
+                // 模拟系统崩溃
+                document.getElementById('currentSQL').innerHTML = '<div class="sql-statement" style="color: red;">⚠️ 系统崩溃！正在恢复...</div>';
+                
+                setTimeout(() => {
+                    document.getElementById('currentSQL').innerHTML = '<div class="sql-statement" style="color: green;">✅ 系统恢复完成，基于Redo Log重做未完成事务</div>';
+                    this.isRunning = false;
+                }, 2000);
+            }
+
+            async simulateTwoPhaseCommit() {
+                // 步骤1: 写入Redo Log (prepare状态)
+                await this.executeCommitStep(1, '写入Redo Log', 'prepare状态');
+                
+                // 步骤2: 写入Binlog
+                await this.executeCommitStep(2, '写入Binlog', '记录SQL语句');
+                
+                // 步骤3: 提交Redo Log
+                await this.executeCommitStep(3, '提交Redo Log', 'prepare -> commit');
+                
+                // 演示崩溃场景
+                setTimeout(() => {
+                    this.demonstrateCrashScenarios();
+                }, 2000);
+            }
+
+            async executeCommitStep(stepNum, action, detail) {
+                const step = document.getElementById(`commitStep${stepNum}`);
+                const status = document.getElementById(`step${stepNum}Status`);
+                
+                // 激活步骤
+                step.classList.add('active');
+                status.textContent = '执行中...';
+                status.className = 'step-status executing';
+                
+                // 模拟执行时间
+                await this.sleep(1500);
+                
+                // 完成步骤
+                step.classList.remove('active');
+                step.classList.add('completed');
+                status.textContent = '已完成';
+                status.className = 'step-status completed';
+                
+                await this.sleep(500);
+            }
+
+            demonstrateCrashScenarios() {
+                // 高亮不同的崩溃场景
+                const scenarios = ['scenario1', 'scenario2', 'scenario3'];
+                scenarios.forEach((scenarioId, index) => {
+                    setTimeout(() => {
+                        const scenario = document.getElementById(scenarioId);
+                        scenario.style.border = '2px solid #ff6b6b';
+                        scenario.style.transform = 'scale(1.02)';
+                        
+                        setTimeout(() => {
+                            scenario.style.border = '2px solid #ddd';
+                            scenario.style.transform = 'scale(1)';
+                        }, 1500);
+                    }, index * 2000);
+                });
+            }
+
+            sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+        }
+
+        // 初始化演示
+        const demo = new TransactionLogDemo();
+
+        function startTransaction() {
+            demo.startTransaction();
+        }
+
+        function simulateUpdate() {
+            demo.simulateUpdate();
+        }
+
+        function simulateCrash() {
+            demo.simulateCrash();
+        }
+
+        function resetDemo() {
+            demo.reset();
+        }
+    </script>
+</body>
+</html>

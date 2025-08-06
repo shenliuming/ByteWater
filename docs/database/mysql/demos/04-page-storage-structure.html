@@ -1,0 +1,2829 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MySQL Page存储结构完整演示</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #2c3e50;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+        }
+
+        .controls {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #3498db, #2980b9);
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            margin: 0 10px;
+            border-radius: 25px;
+            cursor: pointer;
+            font-size: 16px;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(52, 152, 219, 0.4);
+        }
+
+        .demo-flow {
+            display: flex;
+            flex-direction: column;
+            gap: 30px;
+            margin-bottom: 30px;
+        }
+
+        .step-section {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            border: 2px solid #e9ecef;
+            position: relative;
+        }
+
+        .step-title {
+            font-size: 1.8em;
+            font-weight: bold;
+            margin-bottom: 20px;
+            text-align: center;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+        }
+
+        .step-number {
+            background: #3498db;
+            color: white;
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+        }
+
+        /* 步骤1：数据存储进Page */
+        .data-input-area {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .data-record {
+            background: #fff3cd;
+            border: 2px solid #ffc107;
+            border-radius: 8px;
+            padding: 15px;
+            min-width: 150px;
+            text-align: center;
+            transition: all 0.5s ease;
+        }
+
+        .data-record.moving {
+            animation: moveToPage 2s ease-in-out;
+        }
+
+        @keyframes moveToPage {
+            0% { transform: translateX(0); }
+            50% { transform: translateX(100px) scale(0.8); }
+            100% { transform: translateX(0) scale(1); }
+        }
+
+        .arrow-down {
+            font-size: 3em;
+            color: #e74c3c;
+            text-align: center;
+            margin: 15px 0;
+            animation: bounce 2s infinite;
+        }
+
+        @keyframes bounce {
+            0%, 20%, 50%, 80%, 100% { transform: translateY(0); }
+            40% { transform: translateY(-10px); }
+            60% { transform: translateY(-5px); }
+        }
+
+        /* 步骤2：Page连接形成B+树 */
+        .btree-structure {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+        }
+
+        .btree-level {
+            display: flex;
+            gap: 20px;
+            align-items: center;
+        }
+
+        .page {
+            background: #fff;
+            border: 3px solid #3498db;
+            border-radius: 12px;
+            padding: 15px;
+            min-width: 120px;
+            text-align: center;
+            transition: all 0.3s ease;
+            position: relative;
+        }
+
+        .page.root {
+            border-color: #e74c3c;
+            background: #ffe6e6;
+        }
+
+        .page.leaf {
+            border-color: #27ae60;
+            background: #e8f5e8;
+        }
+
+        .page.loading {
+            animation: pulse 1.5s infinite;
+            box-shadow: 0 0 20px rgba(52, 152, 219, 0.5);
+        }
+
+        @keyframes pulse {
+            0% { transform: scale(1); box-shadow: 0 0 20px rgba(52, 152, 219, 0.3); }
+            50% { transform: scale(1.05); box-shadow: 0 0 30px rgba(52, 152, 219, 0.7); }
+            100% { transform: scale(1); box-shadow: 0 0 20px rgba(52, 152, 219, 0.3); }
+        }
+
+        .page-header {
+            background: #3498db;
+            color: white;
+            padding: 5px 10px;
+            border-radius: 6px;
+            font-size: 0.9em;
+            margin-bottom: 10px;
+            font-weight: bold;
+            line-height: 1.4;
+        }
+        
+        .page-header small {
+            font-size: 0.8em;
+            opacity: 0.8;
+        }
+
+        .query-area {
+            background: #f8f9fa;
+            border: 2px solid #007bff;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .query-area h3 {
+            margin: 0 0 10px 0;
+            color: #007bff;
+        }
+
+        .query-box {
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 14px;
+            color: #333;
+        }
+
+        .scan-status {
+            background: #34495e;
+            color: #ecf0f1;
+            padding: 8px 12px;
+            border-radius: 5px;
+            font-size: 12px;
+            margin-top: 10px;
+            border-left: 4px solid #e74c3c;
+            font-weight: bold;
+        }
+
+        .highlight {
+            animation: highlightPulse 2s ease-in-out;
+        }
+
+        .scanning {
+            animation: scanningPulse 1.5s infinite;
+            border: 3px solid #e74c3c !important;
+        }
+
+        .loading {
+            animation: loadingPulse 1s infinite;
+            border: 3px solid #f39c12 !important;
+        }
+
+        @keyframes highlightPulse {
+            0%, 100% { 
+                box-shadow: 0 0 0 rgba(52, 152, 219, 0.7); 
+                transform: scale(1);
+            }
+            50% { 
+                box-shadow: 0 0 20px rgba(52, 152, 219, 0.7); 
+                transform: scale(1.05);
+            }
+        }
+
+        @keyframes scanningPulse {
+            0%, 100% { 
+                box-shadow: 0 0 0 rgba(231, 76, 60, 0.7); 
+                transform: scale(1);
+            }
+            50% { 
+                box-shadow: 0 0 15px rgba(231, 76, 60, 0.7); 
+                transform: scale(1.02);
+            }
+        }
+
+        @keyframes loadingPulse {
+            0%, 100% { 
+                box-shadow: 0 0 0 rgba(243, 156, 18, 0.7); 
+                transform: scale(1);
+            }
+            50% { 
+                box-shadow: 0 0 15px rgba(243, 156, 18, 0.7); 
+                transform: scale(1.03);
+            }
+        }
+
+        /* 磁盘物理结构样式 */
+        .disk-physical-structure {
+            background: #f8f9fa;
+            border: 2px solid #6c757d;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .disk-container {
+            display: flex;
+            align-items: center;
+            gap: 30px;
+        }
+
+        .disk-platter {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            border: 3px solid #495057;
+            border-radius: 50%;
+            background: radial-gradient(circle, #6c757d 0%, #495057 70%, #343a40 100%);
+            margin: 20px;
+        }
+
+        .disk-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            background: #212529;
+            border-radius: 50%;
+            border: 2px solid #adb5bd;
+        }
+
+        .disk-tracks {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 100%;
+            height: 100%;
+        }
+
+        .disk-track {
+            position: absolute;
+            border: 1px solid rgba(173, 181, 189, 0.3);
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .disk-sector {
+            position: absolute;
+            width: 8px;
+            height: 8px;
+            background: #28a745;
+            border-radius: 50%;
+            border: 1px solid #155724;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .disk-sector.active {
+            background: #dc3545;
+            box-shadow: 0 0 10px #dc3545;
+            transform: scale(1.5);
+        }
+
+        .disk-sector.reading {
+            background: #ffc107;
+            animation: sectorReading 1s infinite;
+        }
+
+        .disk-sector.writing {
+            background: #fd7e14;
+            animation: sectorWriting 1s infinite;
+        }
+
+        .disk-sector.written {
+            background: #6f42c1;
+            box-shadow: 0 0 10px #6f42c1;
+            transform: scale(1.3);
+        }
+
+        .disk-sector.completed {
+            background: #20c997;
+            box-shadow: 0 0 8px #20c997;
+            transform: scale(1.2);
+        }
+
+        @keyframes sectorReading {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.3; }
+        }
+
+        @keyframes sectorWriting {
+            0%, 100% { opacity: 1; transform: scale(1.5); }
+            50% { opacity: 0.5; transform: scale(1.8); }
+        }
+
+        .disk-head {
+            position: absolute;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+        }
+
+        .head-arm {
+            width: 4px;
+            height: 80px;
+            background: #6c757d;
+            margin: 0 auto;
+            border-radius: 2px;
+            transition: transform 0.5s ease;
+        }
+
+        .read-head {
+            width: 12px;
+            height: 8px;
+            background: #dc3545;
+            margin: 0 auto;
+            border-radius: 2px;
+            box-shadow: 0 0 5px #dc3545;
+        }
+
+        .disk-info {
+            flex: 1;
+        }
+
+        .disk-stats {
+            background: #e9ecef;
+            padding: 15px;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+
+        .disk-stats div {
+            margin: 8px 0;
+            font-weight: bold;
+            color: #495057;
+        }
+
+        .disk-stats span {
+            color: #007bff;
+        }
+
+        /* Buffer Pool结构样式 */
+        .buffer-pool-structure {
+            background: #f8f9fa;
+            border: 2px solid #17a2b8;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .buffer-pool-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .buffer-pool-header {
+            background: #e9ecef;
+            padding: 10px;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+
+        .pool-stats {
+            display: flex;
+            justify-content: space-around;
+            font-weight: bold;
+        }
+
+        .pool-stats span {
+            color: #495057;
+        }
+
+        .pool-stats span span {
+            color: #17a2b8;
+        }
+
+        .buffer-pool-pages {
+            display: flex;
+            gap: 20px;
+        }
+
+        .lru-list, .free-list, .flush-list {
+            flex: 1;
+            background: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 5px;
+            padding: 10px;
+        }
+
+        .lru-list h5 {
+            color: #28a745;
+            margin: 0 0 10px 0;
+            text-align: center;
+        }
+
+        .free-list h5 {
+            color: #6c757d;
+            margin: 0 0 10px 0;
+            text-align: center;
+        }
+
+        .flush-list h5 {
+            color: #dc3545;
+            margin: 0 0 10px 0;
+            text-align: center;
+        }
+
+        .lru-chain, .free-chain, .flush-chain {
+            min-height: 100px;
+            border: 1px dashed #dee2e6;
+            border-radius: 3px;
+            padding: 5px;
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .buffer-page-item {
+            background: #e9ecef;
+            border: 1px solid #adb5bd;
+            border-radius: 3px;
+            padding: 5px;
+            font-size: 12px;
+            text-align: center;
+            transition: all 0.3s ease;
+        }
+
+        .buffer-page-item.lru {
+            background: #d4edda;
+            border-color: #28a745;
+        }
+
+        .buffer-page-item.free {
+            background: #f8f9fa;
+            border-color: #6c757d;
+        }
+
+        .buffer-page-item.dirty {
+            background: #f8d7da;
+            border-color: #dc3545;
+        }
+
+        .buffer-page-item.active {
+            transform: scale(1.05);
+            box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+        }
+
+        .page.root .page-header {
+            background: #e74c3c;
+        }
+
+        .page.leaf .page-header {
+            background: #27ae60;
+        }
+
+        .record {
+            background: #e8f4fd;
+            border: 1px solid #3498db;
+            border-radius: 4px;
+            padding: 6px;
+            margin: 3px 0;
+            font-size: 0.85em;
+            transition: all 0.3s ease;
+        }
+
+        .record.new {
+            animation: slideIn 0.8s ease;
+            background: #fff3cd;
+            border-color: #ffc107;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-30px) scale(0.8);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0) scale(1);
+            }
+        }
+
+        .connection-line {
+            width: 2px;
+            height: 30px;
+            background: #3498db;
+            margin: 0 auto;
+        }
+
+        /* 步骤3：磁盘到Buffer Pool */
+        .disk-buffer-flow {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 30px;
+        }
+
+        .disk-section, .buffer-pool-section {
+            flex: 1;
+            background: #f1f3f4;
+            border-radius: 12px;
+            padding: 20px;
+            border: 2px solid #ddd;
+            min-height: 300px;
+        }
+
+        .disk-section {
+            border-color: #8e44ad;
+            background: linear-gradient(135deg, #f5f3ff 0%, #ede9fe 100%);
+        }
+
+        .buffer-pool-section {
+            border-color: #16a085;
+            background: linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%);
+        }
+
+        .section-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            margin-bottom: 15px;
+            text-align: center;
+            color: #2c3e50;
+        }
+
+        .transfer-arrow {
+            font-size: 4em;
+            color: #e74c3c;
+            text-align: center;
+            animation: slideRight 2s infinite;
+        }
+
+        /* 新增：流程步骤指示器样式 */
+        .process-indicator {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            margin: 30px 0;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+
+        .process-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: white;
+            transition: all 0.3s ease;
+        }
+
+        .process-step.active {
+            transform: scale(1.1);
+        }
+
+        .process-step.active .step-circle {
+            background: #ffd700;
+            color: #333;
+            box-shadow: 0 0 20px rgba(255, 215, 0, 0.6);
+        }
+
+        .step-circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: rgba(255,255,255,0.2);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            font-size: 18px;
+            margin-bottom: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .step-label {
+            font-size: 12px;
+            text-align: center;
+            font-weight: 500;
+        }
+
+        .process-arrow {
+            font-size: 24px;
+            color: white;
+            margin: 0 20px;
+            opacity: 0.7;
+        }
+
+        /* 新增：主要演示容器样式 */
+        .demo-main-container {
+            display: flex;
+            gap: 20px;
+            margin: 30px 0;
+            min-height: 600px;
+        }
+
+        .demo-left-panel, .demo-right-panel {
+            flex: 1;
+            background: #ffffff;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.1);
+            border: 2px solid #e9ecef;
+        }
+
+        .demo-left-panel {
+            border-left: 5px solid #e74c3c;
+        }
+
+        .demo-right-panel {
+            border-left: 5px solid #3498db;
+        }
+
+        .panel-header {
+            text-align: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #f8f9fa;
+        }
+
+        .panel-header h4 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+        }
+
+        .disk-status, .buffer-status {
+            background: #f8f9fa;
+            padding: 8px 15px;
+            border-radius: 20px;
+            font-size: 14px;
+            color: #6c757d;
+            border: 1px solid #dee2e6;
+        }
+
+        /* 新增：磁盘详细信息样式 */
+        .disk-details {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .detail-row:last-child {
+            border-bottom: none;
+        }
+
+        .detail-row .label {
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .detail-row .value {
+            font-weight: bold;
+            color: #007bff;
+            background: #e7f3ff;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        /* 新增：操作进度样式 */
+        .disk-operation-progress, .buffer-operation-progress {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+
+        .progress-title {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .progress-steps {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .progress-step {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+            transition: all 0.3s ease;
+        }
+
+        .progress-step.active {
+            background: #e7f3ff;
+            border-color: #007bff;
+            transform: translateX(5px);
+        }
+
+        .progress-step.completed {
+            background: #d4edda;
+            border-color: #28a745;
+        }
+
+        .progress-icon {
+            font-size: 18px;
+            width: 30px;
+            text-align: center;
+        }
+
+        .progress-text {
+            flex: 1;
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .progress-status {
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            background: #f8f9fa;
+            color: #6c757d;
+        }
+
+        .progress-step.active .progress-status {
+            background: #007bff;
+            color: white;
+        }
+
+        .progress-step.completed .progress-status {
+            background: #28a745;
+            color: white;
+        }
+
+        /* 新增：操作控制面板样式 */
+        .operation-control-panel {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 15px;
+            padding: 25px;
+            margin: 20px 0;
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+
+        .control-section h4 {
+            color: white;
+            text-align: center;
+            margin: 0 0 20px 0;
+            font-size: 20px;
+        }
+
+        .control-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+
+        .control-btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            min-width: 200px;
+        }
+
+        .read-btn {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+        }
+
+        .read-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+        }
+
+        .write-btn {
+            background: linear-gradient(135deg, #dc3545, #fd7e14);
+            color: white;
+        }
+
+        .write-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
+        }
+
+        .reset-btn {
+            background: linear-gradient(135deg, #6c757d, #495057);
+            color: white;
+        }
+
+        .reset-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(108, 117, 125, 0.4);
+        }
+
+        .operation-status {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            background: rgba(255,255,255,0.1);
+            border-radius: 20px;
+            padding: 12px 20px;
+            color: white;
+        }
+
+        .status-indicator {
+            font-size: 20px;
+            animation: pulse 2s infinite;
+        }
+
+        .status-text {
+            font-weight: 500;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        /* 新增：双向流程指示器样式 */
+        .bidirectional-process {
+            margin: 30px 0;
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            border: 2px solid #e9ecef;
+        }
+
+        .process-direction {
+            margin-bottom: 25px;
+        }
+
+        .process-direction:last-child {
+            margin-bottom: 0;
+        }
+
+        .process-title {
+            font-size: 18px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            text-align: center;
+            padding: 10px;
+            border-radius: 8px;
+        }
+
+        .process-direction:nth-child(1) .process-title {
+            background: linear-gradient(135deg, #28a745, #20c997);
+            color: white;
+        }
+
+        .process-direction:nth-child(2) .process-title {
+            background: linear-gradient(135deg, #dc3545, #fd7e14);
+            color: white;
+        }
+
+        .process-steps {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+
+        .process-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 15px;
+            background: white;
+            border-radius: 10px;
+            border: 2px solid #dee2e6;
+            transition: all 0.3s ease;
+            min-width: 120px;
+        }
+
+        .process-step.active {
+            border-color: #007bff;
+            background: #e7f3ff;
+            transform: scale(1.05);
+        }
+
+        .process-step.completed {
+            border-color: #28a745;
+            background: #d4edda;
+        }
+
+        .step-description {
+            font-size: 11px;
+            color: #6c757d;
+            text-align: center;
+            margin: 5px 0;
+            line-height: 1.3;
+            max-width: 140px;
+        }
+
+        .step-status {
+            font-size: 12px;
+            padding: 4px 8px;
+            border-radius: 12px;
+            background: #f8f9fa;
+            color: #6c757d;
+            margin-top: 8px;
+        }
+
+        .process-step.active .step-status {
+            background: #007bff;
+            color: white;
+        }
+
+        .process-step.completed .step-status {
+            background: #28a745;
+            color: white;
+        }
+
+        /* 新增：双向数据流动样式 */
+        .demo-center-flow {
+            width: 120px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        .flow-container {
+            position: relative;
+            height: 400px;
+            width: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            gap: 40px;
+        }
+
+        .flow-arrow {
+            position: relative;
+            height: 60px;
+            width: 100%;
+            opacity: 0.3;
+            transition: all 0.5s ease;
+        }
+
+        .flow-arrow.active {
+            opacity: 1;
+            transform: scale(1.1);
+        }
+
+        .read-flow {
+            transform: rotate(0deg);
+        }
+
+        .write-flow {
+            transform: rotate(180deg);
+        }
+
+        .arrow-body {
+            height: 8px;
+            background: linear-gradient(90deg, #007bff, #0056b3);
+            border-radius: 4px;
+            position: relative;
+            margin: 26px 10px 26px 0;
+        }
+
+        .write-flow .arrow-body {
+            background: linear-gradient(90deg, #dc3545, #c82333);
+        }
+
+        .arrow-head {
+            position: absolute;
+            right: -10px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 0;
+            height: 0;
+            border-left: 20px solid #0056b3;
+            border-top: 15px solid transparent;
+            border-bottom: 15px solid transparent;
+        }
+
+        .write-flow .arrow-head {
+            border-left-color: #c82333;
+        }
+
+        .flow-data {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: white;
+            padding: 8px 12px;
+            border-radius: 20px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+            font-size: 12px;
+            font-weight: bold;
+            white-space: nowrap;
+            opacity: 0;
+            transition: all 0.3s ease;
+        }
+
+        .flow-arrow.active .flow-data {
+            opacity: 1;
+            animation: flowData 2s ease-in-out infinite;
+        }
+
+        @keyframes flowData {
+            0%, 100% { transform: translate(-50%, -50%) scale(1); }
+            50% { transform: translate(-50%, -50%) scale(1.1); }
+        }
+
+        .flow-label {
+            text-align: center;
+            font-weight: bold;
+            color: #6c757d;
+            margin-top: 20px;
+            padding: 8px 15px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            border: 1px solid #dee2e6;
+        }
+
+        /* 新增：Buffer Pool统计样式优化 */
+        .buffer-pool-stats {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .stat-item {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            border: 1px solid #dee2e6;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-size: 16px;
+            font-weight: bold;
+            color: #007bff;
+        }
+
+
+        .progress-step.completed .progress-status {
+            background: #28a745;
+            color: white;
+        }
+
+        /* 新增：中间数据流动样式 */
+        .demo-center-flow {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            width: 120px;
+            position: relative;
+        }
+
+        .flow-arrow {
+            position: relative;
+            width: 80px;
+            height: 6px;
+            background: #e74c3c;
+            border-radius: 3px;
+            margin: 20px 0;
+        }
+
+        .arrow-head {
+            position: absolute;
+            right: -10px;
+            top: -7px;
+            width: 0;
+            height: 0;
+            border-left: 20px solid #e74c3c;
+            border-top: 10px solid transparent;
+            border-bottom: 10px solid transparent;
+        }
+
+        .flow-data {
+            position: absolute;
+            top: -30px;
+            left: 50%;
+            transform: translateX(-50%);
+            opacity: 0;
+        }
+
+        .flow-data.flowing {
+            animation: dataFlow 2s ease-in-out;
+        }
+
+        .data-packet {
+            background: #ffd700;
+            color: #333;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: bold;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+        }
+
+        @keyframes dataFlow {
+            0% {
+                opacity: 0;
+                transform: translateX(-150%);
+            }
+            50% {
+                opacity: 1;
+                transform: translateX(-50%);
+            }
+            100% {
+                opacity: 0;
+                transform: translateX(50%);
+            }
+        }
+
+        .flow-label {
+            font-size: 12px;
+            color: #6c757d;
+            font-weight: 500;
+            text-align: center;
+        }
+
+        /* 新增：Buffer Pool统计样式 */
+        .buffer-pool-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(100px, 1fr));
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .stat-item {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+            border: 1px solid #dee2e6;
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 5px;
+        }
+
+        .stat-value {
+            font-weight: bold;
+            color: #007bff;
+            font-size: 14px;
+        }
+
+        /* 新增：底部演示区域样式 */
+        .demo-bottom-section {
+            margin-top: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 15px;
+            border: 2px solid #e9ecef;
+        }
+
+        /* 更新磁盘容器样式 */
+        .disk-container {
+            display: flex;
+            justify-content: center;
+            margin: 20px 0;
+        }
+
+        .disk-platter {
+            position: relative;
+            width: 180px;
+            height: 180px;
+            border: 3px solid #495057;
+            border-radius: 50%;
+            background: radial-gradient(circle, #6c757d 0%, #495057 70%, #343a40 100%);
+        }
+
+        @keyframes slideRight {
+            0%, 100% { transform: translateX(0); }
+            50% { transform: translateX(20px); }
+        }
+
+        .log-section {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            border: 2px solid #e9ecef;
+            max-height: 350px;
+            overflow-y: auto;
+        }
+
+        .log-entry {
+            padding: 10px 15px;
+            margin: 8px 0;
+            border-radius: 8px;
+            border-left: 4px solid #3498db;
+            background: white;
+            animation: fadeIn 0.5s ease;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .log-entry.success {
+            border-left-color: #27ae60;
+            background: #f8fff8;
+        }
+
+        .log-entry.warning {
+            border-left-color: #f39c12;
+            background: #fffbf0;
+        }
+
+        .log-entry.info {
+            border-left-color: #3498db;
+            background: #f8fbff;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .status-bar {
+            background: linear-gradient(45deg, #2c3e50, #34495e);
+            color: white;
+            padding: 15px;
+            border-radius: 10px;
+            text-align: center;
+            margin-bottom: 25px;
+            font-weight: bold;
+            font-size: 1.1em;
+        }
+
+        .highlight {
+            animation: highlight 1s ease;
+        }
+
+        @keyframes highlight {
+            0% { background-color: transparent; }
+            50% { background-color: #fff3cd; }
+            100% { background-color: transparent; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🗄️ MySQL Page存储结构完整演示</h1>
+        
+        <div class="status-bar" id="statusBar">
+            准备演示完整的Page存储流程：数据存储 → Page连接 → 磁盘读取到Buffer Pool
+        </div>
+
+        <div class="controls">
+            <button class="btn" onclick="demonstrateDataStorage()">📝 演示数据存储进Page</button>
+            <button class="btn" onclick="demonstratePageConnection()">🔗 演示Page连接成B+树</button>
+            <button class="btn" onclick="demonstrateDiskToBuffer()">💾 演示磁盘读取到Buffer Pool</button>
+            <button class="btn" onclick="demonstrateQuery()">🔍 演示查询操作</button>
+            <button class="btn" onclick="demonstrateComplete()">🎬 完整演示流程</button>
+            <button class="btn" onclick="reset()">🔄 重置演示</button>
+        </div>
+
+        <div class="demo-flow">
+            <!-- 步骤1：数据存储进Page -->
+            <div class="step-section" id="step1">
+                <div class="step-title">
+                    <div class="step-number">1</div>
+                    数据存储进入Page
+                </div>
+                <div class="data-input-area" id="dataInputArea">
+                    <!-- 动态生成数据记录 -->
+                </div>
+                <div class="arrow-down">⬇️</div>
+                <div id="storagePages" style="display: flex; gap: 20px; justify-content: center; flex-wrap: wrap;">
+                    <!-- 动态生成Page -->
+                </div>
+            </div>
+
+            <!-- 步骤2：Page连接形成B+树 -->
+            <div class="step-section" id="step2">
+                <div class="step-title">
+                    <div class="step-number">2</div>
+                    Page连接形成B+树结构
+                </div>
+                <div class="btree-structure" id="btreeStructure">
+                    <!-- 动态生成B+树结构 -->
+                </div>
+            </div>
+
+            <!-- 步骤3：磁盘物理结构与Buffer Pool读写演示 -->
+            <div class="step-section" id="step3">
+                <div class="step-title">
+                    <div class="step-number">3</div>
+                    磁盘物理结构与Buffer Pool读写演示
+                </div>
+                
+                <!-- 操作控制面板 -->
+                <div class="operation-control-panel">
+                    <div class="control-section">
+                        <h4>📋 操作控制</h4>
+                        <div class="control-buttons">
+                            <button class="control-btn read-btn" onclick="startDiskToBufferDemo()">
+                                📖 磁盘读取到Buffer Pool
+                            </button>
+                            <button class="control-btn write-btn" onclick="startBufferToDiskDemo()">
+                                💾 Buffer Pool写回磁盘
+                            </button>
+                            <button class="control-btn reset-btn" onclick="resetDemo()">
+                                🔄 重置演示
+                            </button>
+                        </div>
+                        <div class="operation-status" id="operationStatus">
+                            <div class="status-indicator" id="statusIndicator">⏸️</div>
+                            <div class="status-text" id="statusText">等待操作...</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 双向流程指示器 -->
+                <div class="bidirectional-process">
+                    <!-- 读取流程：磁盘 → Buffer Pool -->
+                    <div class="process-direction" id="readProcess">
+                        <div class="process-title">📖 读取流程：磁盘 → Buffer Pool</div>
+                        <div class="process-steps">
+                            <div class="process-step" id="read-step-1">
+                                <div class="step-circle">1</div>
+                                <div class="step-label">SQL查询请求</div>
+                                <div class="step-description">接收SELECT查询，解析目标页面ID</div>
+                                <div class="step-status">待执行</div>
+                            </div>
+                            <div class="process-arrow">→</div>
+                            <div class="process-step" id="read-step-2">
+                                <div class="step-circle">2</div>
+                                <div class="step-label">Buffer Pool检查</div>
+                                <div class="step-description">在LRU链表中查找页面，检查缓存命中</div>
+                                <div class="step-status">待执行</div>
+                            </div>
+                            <div class="process-arrow">→</div>
+                            <div class="process-step" id="read-step-3">
+                                <div class="step-circle">3</div>
+                                <div class="step-label">磁盘寻址定位</div>
+                                <div class="step-description">计算页面物理地址，移动磁头到目标磁道</div>
+                                <div class="step-status">待执行</div>
+                            </div>
+                            <div class="process-arrow">→</div>
+                            <div class="process-step" id="read-step-4">
+                                <div class="step-circle">4</div>
+                                <div class="step-label">磁盘数据读取</div>
+                                <div class="step-description">等待磁盘旋转，读取扇区数据到内存</div>
+                                <div class="step-status">待执行</div>
+                            </div>
+                            <div class="process-arrow">→</div>
+                            <div class="process-step" id="read-step-5">
+                                <div class="step-circle">5</div>
+                                <div class="step-label">加载到Buffer Pool</div>
+                                <div class="step-description">将页面加入LRU链表头部，更新统计信息</div>
+                                <div class="step-status">待执行</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 写入流程：Buffer Pool → 磁盘 -->
+                    <div class="process-direction" id="writeProcess">
+                        <div class="process-title">💾 写入流程：Buffer Pool → 磁盘</div>
+                        <div class="process-steps">
+                            <div class="process-step" id="write-step-1">
+                                <div class="step-circle">1</div>
+                                <div class="step-label">脏页检测</div>
+                                <div class="step-description">扫描Buffer Pool，识别需要刷盘的脏页</div>
+                                <div class="step-status">待执行</div>
+                            </div>
+                            <div class="process-arrow">→</div>
+                            <div class="process-step" id="write-step-2">
+                                <div class="step-circle">2</div>
+                                <div class="step-label">Flush链表处理</div>
+                                <div class="step-description">从Flush链表选择页面，准备写回操作</div>
+                                <div class="step-status">待执行</div>
+                            </div>
+                            <div class="process-arrow">→</div>
+                            <div class="process-step" id="write-step-3">
+                                <div class="step-circle">3</div>
+                                <div class="step-label">磁盘寻址定位</div>
+                                <div class="step-description">计算目标磁盘位置，移动磁头到写入磁道</div>
+                                <div class="step-status">待执行</div>
+                            </div>
+                            <div class="process-arrow">→</div>
+                            <div class="process-step" id="write-step-4">
+                                <div class="step-circle">4</div>
+                                <div class="step-label">磁盘数据写入</div>
+                                <div class="step-description">等待磁盘旋转，将脏页数据写入扇区</div>
+                                <div class="step-status">待执行</div>
+                            </div>
+                            <div class="process-arrow">→</div>
+                            <div class="process-step" id="write-step-5">
+                                <div class="step-circle">5</div>
+                                <div class="step-label">更新页面状态</div>
+                                <div class="step-description">清除脏页标记，从Flush链表移除</div>
+                                <div class="step-status">待执行</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 主要演示区域：左右布局 -->
+                <div class="demo-main-container">
+                    <!-- 左侧：磁盘物理结构 -->
+                    <div class="demo-left-panel">
+                        <div class="panel-header">
+                            <h4>💿 磁盘物理结构</h4>
+                            <div class="disk-status" id="diskStatus">等待操作...</div>
+                        </div>
+                        
+                        <div class="disk-container">
+                            <div class="disk-platter">
+                                <div class="disk-center"></div>
+                                <div class="disk-tracks">
+                                    <!-- 磁道和扇区将通过JavaScript动态生成 -->
+                                </div>
+                                <div class="disk-head">
+                                    <div class="head-arm"></div>
+                                    <div class="read-head"></div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="disk-details">
+                            <div class="detail-row">
+                                <span class="label">当前磁道:</span>
+                                <span class="value" id="currentTrack">0</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="label">当前扇区:</span>
+                                <span class="value" id="currentSector">0</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="label">寻道时间:</span>
+                                <span class="value" id="seekTime">0ms</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="label">旋转延迟:</span>
+                                <span class="value" id="rotationDelay">0ms</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="label">传输时间:</span>
+                                <span class="value" id="transferTime">0ms</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="label">总I/O时间:</span>
+                                <span class="value" id="totalIOTime">0ms</span>
+                            </div>
+                        </div>
+
+                        <!-- 磁盘操作进度 -->
+                        <div class="disk-operation-progress">
+                            <div class="progress-title">磁盘操作进度</div>
+                            <div class="progress-steps">
+                                <div class="progress-step" id="seek-progress">
+                                    <div class="progress-icon">🎯</div>
+                                    <div class="progress-text">寻道定位</div>
+                                    <div class="progress-status">待执行</div>
+                                </div>
+                                <div class="progress-step" id="rotation-progress">
+                                    <div class="progress-icon">🔄</div>
+                                    <div class="progress-text">旋转等待</div>
+                                    <div class="progress-status">待执行</div>
+                                </div>
+                                <div class="progress-step" id="io-progress">
+                                    <div class="progress-icon">📖</div>
+                                    <div class="progress-text">数据I/O</div>
+                                    <div class="progress-status">待执行</div>
+                                </div>
+                                <div class="progress-step" id="transfer-progress">
+                                    <div class="progress-icon">📤</div>
+                                    <div class="progress-text">数据传输</div>
+                                    <div class="progress-status">待执行</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 中间：双向数据流动 -->
+                    <div class="demo-center-flow">
+                        <div class="flow-container">
+                            <!-- 读取流动：磁盘 → Buffer Pool -->
+                            <div class="flow-arrow read-flow" id="readDataFlow">
+                                <div class="arrow-body"></div>
+                                <div class="arrow-head"></div>
+                                <div class="flow-data" id="readFlowingData">
+                                    <div class="data-packet">📖 Page Data</div>
+                                </div>
+                            </div>
+                            
+                            <!-- 写入流动：Buffer Pool → 磁盘 -->
+                            <div class="flow-arrow write-flow" id="writeDataFlow">
+                                <div class="arrow-body"></div>
+                                <div class="arrow-head"></div>
+                                <div class="flow-data" id="writeFlowingData">
+                                    <div class="data-packet">💾 Dirty Page</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="flow-label" id="flowLabel">等待操作...</div>
+                    </div>
+
+                    <!-- 右侧：Buffer Pool结构 -->
+                    <div class="demo-right-panel">
+                        <div class="panel-header">
+                            <h4>🧠 Buffer Pool 内存结构</h4>
+                            <div class="buffer-status" id="bufferStatus">等待数据...</div>
+                        </div>
+                        
+                        <div class="buffer-pool-stats">
+                            <div class="stat-item">
+                                <div class="stat-label">总容量</div>
+                                <div class="stat-value" id="poolTotalSize">128MB</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">已使用</div>
+                                <div class="stat-value" id="poolUsedSize">0MB</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">命中率</div>
+                                <div class="stat-value" id="poolHitRate">0%</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">读取次数</div>
+                                <div class="stat-value" id="poolReadCount">0</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">写入次数</div>
+                                <div class="stat-value" id="poolWriteCount">0</div>
+                            </div>
+                            <div class="stat-item">
+                                <div class="stat-label">脏页数量</div>
+                                <div class="stat-value" id="poolDirtyCount">0</div>
+                            </div>
+                        </div>
+
+                        <div class="buffer-pool-structure">
+                            <div class="lru-list">
+                                <h5>🔄 LRU链表 (最近最少使用)</h5>
+                                <div id="lruChain" class="lru-chain"></div>
+                            </div>
+                            <div class="free-list">
+                                <h5>🆓 Free链表 (空闲页面)</h5>
+                                <div id="freeChain" class="free-chain"></div>
+                            </div>
+                            <div class="flush-list">
+                                <h5>💾 Flush链表 (脏页)</h5>
+                                <div id="flushChain" class="flush-chain"></div>
+                            </div>
+                        </div>
+
+                        <!-- Buffer Pool操作进度 -->
+                        <div class="buffer-operation-progress">
+                            <div class="progress-title">Buffer Pool操作</div>
+                            <div class="progress-steps">
+                                <div class="progress-step" id="cache-check-progress">
+                                    <div class="progress-icon">🔍</div>
+                                    <div class="progress-text">缓存检查</div>
+                                    <div class="progress-status">待执行</div>
+                                </div>
+                                <div class="progress-step" id="page-manage-progress">
+                                    <div class="progress-icon">📄</div>
+                                    <div class="progress-text">页面管理</div>
+                                    <div class="progress-status">待执行</div>
+                                </div>
+                                <div class="progress-step" id="lru-update-progress">
+                                    <div class="progress-icon">🔄</div>
+                                    <div class="progress-text">LRU更新</div>
+                                    <div class="progress-status">待执行</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="log-section">
+            <div class="step-title">📋 操作日志</div>
+            <div id="operationLog"></div>
+        </div>
+    </div>
+
+    <script>
+        let recordId = 1;
+        let pageId = 1;
+        let pages = [];
+        let bufferPoolPages = [];
+        let currentStep = 0;
+        
+        // 磁盘物理结构
+        let diskStructure = {
+            tracks: 8,        // 磁道数
+            sectorsPerTrack: 16,  // 每磁道扇区数
+            currentTrack: 0,
+            currentSector: 0,
+            sectors: []       // 扇区数据映射
+        };
+        
+        // Buffer Pool管理
+        let bufferPoolManager = {
+            totalSize: 128 * 1024 * 1024,  // 128MB
+            pageSize: 16 * 1024,            // 16KB per page
+            maxPages: 8192,                 // 最大页面数
+            usedPages: 0,
+            hitCount: 0,
+            missCount: 0,
+            lruList: [],      // LRU链表
+            freeList: [],     // 空闲链表
+            flushList: []     // 脏页链表
+        };
+        
+        // 工具函数
+        function sleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms));
+        }
+
+        // 初始化磁盘物理结构
+        function initializeDiskStructure() {
+            const tracksContainer = document.querySelector('.disk-tracks');
+            tracksContainer.innerHTML = '';
+            
+            // 初始化扇区数据
+            diskStructure.sectors = [];
+            
+            for (let track = 0; track < diskStructure.tracks; track++) {
+                // 创建磁道
+                const trackElement = document.createElement('div');
+                trackElement.className = 'disk-track';
+                const radius = 30 + track * 15;
+                trackElement.style.width = radius * 2 + 'px';
+                trackElement.style.height = radius * 2 + 'px';
+                tracksContainer.appendChild(trackElement);
+                
+                // 在每个磁道上创建扇区
+                for (let sector = 0; sector < diskStructure.sectorsPerTrack; sector++) {
+                    const sectorElement = document.createElement('div');
+                    sectorElement.className = 'disk-sector';
+                    sectorElement.setAttribute('data-track', track);
+                    sectorElement.setAttribute('data-sector', sector);
+                    
+                    // 计算扇区位置
+                    const angle = (sector / diskStructure.sectorsPerTrack) * 2 * Math.PI;
+                    const x = Math.cos(angle) * radius;
+                    const y = Math.sin(angle) * radius;
+                    
+                    sectorElement.style.left = (100 + x - 4) + 'px';
+                    sectorElement.style.top = (100 + y - 4) + 'px';
+                    
+                    // 随机分配一些扇区给页面
+                    const sectorData = {
+                        track: track,
+                        sector: sector,
+                        pageId: null,
+                        element: sectorElement
+                    };
+                    
+                    // 为前几个页面分配扇区
+                    if (diskStructure.sectors.length < pages.length) {
+                        sectorData.pageId = pages[diskStructure.sectors.length].id;
+                        sectorElement.title = `Page ${sectorData.pageId}`;
+                    }
+                    
+                    diskStructure.sectors.push(sectorData);
+                    tracksContainer.appendChild(sectorElement);
+                }
+            }
+        }
+
+        // 初始化Buffer Pool
+        function initializeBufferPool() {
+            // 初始化空闲链表
+            bufferPoolManager.freeList = [];
+            for (let i = 0; i < 20; i++) {  // 显示20个空闲页面槽位
+                bufferPoolManager.freeList.push({
+                    id: `free_${i}`,
+                    type: 'free',
+                    status: 'available'
+                });
+            }
+            
+            bufferPoolManager.lruList = [];
+            bufferPoolManager.flushList = [];
+            bufferPoolManager.usedPages = 0;
+            bufferPoolManager.hitCount = 0;
+            bufferPoolManager.missCount = 0;
+            
+            renderBufferPoolStructure();
+        }
+
+        // 渲染Buffer Pool结构
+        function renderBufferPoolStructure() {
+            // 更新统计信息
+            const usedSizeMB = (bufferPoolManager.usedPages * bufferPoolManager.pageSize / (1024 * 1024)).toFixed(1);
+            const hitRate = bufferPoolManager.hitCount + bufferPoolManager.missCount > 0 ? 
+                ((bufferPoolManager.hitCount / (bufferPoolManager.hitCount + bufferPoolManager.missCount)) * 100).toFixed(1) : 0;
+            
+            document.getElementById('poolUsedSize').textContent = usedSizeMB + 'MB';
+            document.getElementById('poolHitRate').textContent = hitRate + '%';
+            
+            // 渲染LRU链表
+            const lruChain = document.getElementById('lruChain');
+            lruChain.innerHTML = '';
+            bufferPoolManager.lruList.forEach((page, index) => {
+                const pageItem = document.createElement('div');
+                pageItem.className = 'buffer-page-item lru';
+                pageItem.textContent = `Page ${page.id}`;
+                if (index === 0) pageItem.style.fontWeight = 'bold';
+                lruChain.appendChild(pageItem);
+            });
+            
+            // 渲染Free链表
+            const freeChain = document.getElementById('freeChain');
+            freeChain.innerHTML = '';
+            bufferPoolManager.freeList.slice(0, 10).forEach(page => {
+                const pageItem = document.createElement('div');
+                pageItem.className = 'buffer-page-item free';
+                pageItem.textContent = page.status === 'available' ? '空闲槽位' : `Page ${page.id}`;
+                freeChain.appendChild(pageItem);
+            });
+            
+            // 渲染Flush链表（脏页）
+            const flushChain = document.getElementById('flushChain');
+            flushChain.innerHTML = '';
+            bufferPoolManager.flushList.forEach(page => {
+                const pageItem = document.createElement('div');
+                pageItem.className = 'buffer-page-item dirty';
+                pageItem.textContent = `Page ${page.id} (脏)`;
+                flushChain.appendChild(pageItem);
+            });
+        }
+
+        // 模拟磁盘寻址
+        async function simulateDiskSeek(targetTrack, targetSector) {
+            const currentTrack = diskStructure.currentTrack;
+            const seekTime = Math.abs(targetTrack - currentTrack) * 2; // 每磁道2ms
+            const rotationDelay = Math.random() * 8; // 0-8ms旋转延迟
+            
+            // 更新显示
+            document.getElementById('currentTrack').textContent = targetTrack;
+            document.getElementById('currentSector').textContent = targetSector;
+            document.getElementById('seekTime').textContent = seekTime.toFixed(1) + 'ms';
+            document.getElementById('rotationDelay').textContent = rotationDelay.toFixed(1) + 'ms';
+            
+            // 移动磁头
+            const headArm = document.querySelector('.head-arm');
+            const angle = (targetTrack / diskStructure.tracks) * 45 - 22.5; // -22.5 to 22.5 degrees
+            headArm.style.transform = `rotate(${angle}deg)`;
+            
+            // 高亮目标扇区
+            const targetSectorElement = document.querySelector(`[data-track="${targetTrack}"][data-sector="${targetSector}"]`);
+            if (targetSectorElement) {
+                targetSectorElement.classList.add('active');
+                setTimeout(() => {
+                    targetSectorElement.classList.remove('active');
+                }, 2000);
+            }
+            
+            diskStructure.currentTrack = targetTrack;
+            diskStructure.currentSector = targetSector;
+            
+            return seekTime + rotationDelay;
+        }
+
+        // Buffer Pool页面管理
+        function addPageToBufferPool(page) {
+            // 从Free链表获取空闲槽位
+            if (bufferPoolManager.freeList.length > 0) {
+                const freeSlot = bufferPoolManager.freeList.shift();
+                
+                // 添加到LRU链表头部
+                const bufferPage = {
+                    id: page.id,
+                    records: page.records,
+                    type: page.type,
+                    usedSpace: page.usedSpace,
+                    loadTime: new Date().toLocaleTimeString(),
+                    isDirty: false
+                };
+                
+                bufferPoolManager.lruList.unshift(bufferPage);
+                bufferPoolManager.usedPages++;
+                
+                // 模拟页面被修改，随机标记为脏页
+                if (Math.random() < 0.7) { // 70%概率成为脏页
+                    setTimeout(() => {
+                        markPageAsDirty(bufferPage.id);
+                    }, 2000);
+                }
+                
+                renderBufferPoolStructure();
+                
+                addLog(`📝 页面已添加到Buffer Pool LRU链表头部`, 'success');
+                return true;
+            } else {
+                // Buffer Pool满了，需要LRU淘汰
+                addLog(`⚠️ Buffer Pool已满，执行LRU淘汰策略`, 'warning');
+                return false;
+            }
+        }
+
+        function markPageAsDirty(pageId) {
+            const page = bufferPoolManager.lruList.find(p => p.id === pageId);
+            if (page && !page.isDirty) {
+                page.isDirty = true;
+                bufferPoolManager.flushList.push(page);
+                renderBufferPoolStructure();
+                addLog(`💾 Page ${pageId} 标记为脏页，添加到Flush链表`, 'info');
+            }
+        }
+
+        // 手动创建脏页用于演示
+        function createDirtyPageForDemo() {
+            if (bufferPoolManager.lruList.length > 0) {
+                const randomPage = bufferPoolManager.lruList[Math.floor(Math.random() * bufferPoolManager.lruList.length)];
+                if (!randomPage.isDirty) {
+                    markPageAsDirty(randomPage.id);
+                    addLog(`🔧 手动创建脏页: Page ${randomPage.id}`, 'info');
+                }
+            }
+        }
+        
+        // 真实的用户表结构
+        const userNames = ['张三', '李四', '王五', '赵六', '钱七', '孙八', '周九', '吴十', 
+                          '郑十一', '王十二', '冯十三', '陈十四', '褚十五', '卫十六', '蒋十七', 
+                          '沈十八', '韩十九', '杨二十', '朱二十一', '秦二十二'];
+        const cities = ['北京', '上海', '广州', '深圳', '杭州', '南京', '武汉', '成都', '西安', '重庆'];
+        const emails = ['@qq.com', '@163.com', '@gmail.com', '@sina.com', '@126.com'];
+
+        function updateStatus(message) {
+            document.getElementById('statusBar').textContent = message;
+        }
+
+        function addLog(message, type = 'info') {
+            const log = document.getElementById('operationLog');
+            const entry = document.createElement('div');
+            entry.className = `log-entry ${type}`;
+            entry.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
+            log.appendChild(entry);
+            log.scrollTop = log.scrollHeight;
+        }
+
+        // 计算记录大小（字节）
+        function calculateRecordSize(record) {
+            // 模拟真实场景：每条记录约4KB，这样4条记录填满16KB页面
+            let baseSize = 4000; // 基础4KB
+            
+            // 添加一些变化，模拟不同记录的大小差异
+            let variableSize = Math.floor(Math.random() * 200) + 50; // 50-250字节的变化
+            
+            // 模拟包含更多字段的用户表（如头像、简介、扩展信息等）
+            let totalSize = baseSize + variableSize;
+            
+            return totalSize;
+        }
+
+        let currentId = 1;
+        
+        function createRecord(id = null) {
+            const recordId = id || currentId++;
+            const name = userNames[Math.floor(Math.random() * userNames.length)];
+            const city = cities[Math.floor(Math.random() * cities.length)];
+            const emailPrefix = name.replace(/[^\w]/g, '');
+            const emailSuffix = emails[Math.floor(Math.random() * emails.length)];
+            
+            const record = {
+                id: recordId,
+                name: name,
+                age: 18 + Math.floor(Math.random() * 50),
+                email: `${emailPrefix}${Math.floor(Math.random() * 100)}${emailSuffix}`,
+                city: city,
+                created_time: new Date().toISOString().slice(0, 19).replace('T', ' ')
+            };
+            
+            record.size = calculateRecordSize(record);
+            return record;
+        }
+
+        async function demonstrateDataStorage() {
+            updateStatus('演示步骤1：数据如何存储进入Page（16KB限制）');
+            addLog('开始演示数据存储进Page的过程', 'info');
+            addLog('模拟插入用户表数据 (id < 20)...', 'info');
+            
+            const dataInputArea = document.getElementById('dataInputArea');
+            const storagePages = document.getElementById('storagePages');
+            
+            // 清空之前的内容
+            dataInputArea.innerHTML = '';
+            storagePages.innerHTML = '';
+            
+            // 插入记录 (id 1-10)，每条约4KB，演示页面填充过程
+             for (let i = 1; i <= 10; i++) {
+                 const newRecord = createRecord(i);
+                const recordDiv = document.createElement('div');
+                recordDiv.className = 'data-record';
+                recordDiv.innerHTML = `
+                    <strong>新用户记录</strong><br>
+                    ID: ${newRecord.id}<br>
+                    姓名: ${newRecord.name}<br>
+                    年龄: ${newRecord.age}<br>
+                    邮箱: ${newRecord.email}<br>
+                    城市: ${newRecord.city}<br>
+                    <small>记录大小: ${newRecord.size} 字节</small>
+                `;
+                dataInputArea.innerHTML = '';
+                dataInputArea.appendChild(recordDiv);
+                
+                addLog(`准备插入记录: ID=${newRecord.id}, 姓名=${newRecord.name}, 年龄=${newRecord.age}, 城市=${newRecord.city}, 大小=${(newRecord.size/1024).toFixed(1)}KB`, 'info');
+                
+                recordDiv.classList.add('moving');
+                
+                await new Promise(resolve => {
+                    setTimeout(() => {
+                        // 找到或创建目标Page（考虑16KB限制）
+                        let targetPage = findAvailablePage(newRecord.size);
+                        if (!targetPage) {
+                            targetPage = createNewPage();
+                            addLog(`✨ 创建新页面: Page ${targetPage.id} (16KB容量)`, 'success');
+                        }
+                        
+                        targetPage.records.push(newRecord);
+                        targetPage.usedSpace += newRecord.size;
+                        
+                        const usagePercent = ((targetPage.usedSpace / 16384) * 100).toFixed(1);
+                         const remainingSpace = 16384 - targetPage.usedSpace;
+                         addLog(`✅ 记录已插入到 Page ${targetPage.id}，使用率: ${usagePercent}%，剩余: ${(remainingSpace/1024).toFixed(1)}KB`, 'success');
+                        
+                        // 检查页面是否接近满载
+                        if (usagePercent > 80) {
+                            addLog(`⚠️ Page ${targetPage.id} 使用率超过80%，接近满载`, 'warning');
+                        }
+                        
+                        // 渲染Page
+                        renderStoragePages();
+                        updateStatus(`数据已成功存储到Page ${targetPage.id}，剩余空间${(remainingSpace/1024).toFixed(1)}KB`);
+                        resolve();
+                    }, 800);
+                });
+            }
+            
+            addLog('🎉 数据存储演示完成！', 'success');
+            addLog(`📊 总计创建了 ${pages.length} 个页面，存储了 ${pages.reduce((total, page) => total + page.records.length, 0)} 条记录`, 'info');
+        }
+
+        function findAvailablePage(recordSize) {
+            // 页面开销1KB，实际可用空间15KB，每条记录约4KB，所以每页约能存3-4条记录
+            return pages.find(page => (page.usedSpace + recordSize) <= 15360); // 16KB - 1KB开销 = 15KB可用
+        }
+
+        function createNewPage() {
+            const newPage = {
+                id: pageId++,
+                records: [],
+                type: 'leaf',
+                usedSpace: 1024 // 1KB页面管理开销（页头、页尾、槽目录等）
+            };
+            pages.push(newPage);
+            return newPage;
+        }
+
+        function renderStoragePages() {
+            const container = document.getElementById('storagePages');
+            container.innerHTML = '';
+            
+            pages.forEach(page => {
+                const pageDiv = document.createElement('div');
+                pageDiv.className = `page ${page.type}`;
+                
+                const header = document.createElement('div');
+                header.className = 'page-header';
+                const usagePercent = ((page.usedSpace / 16384) * 100).toFixed(1);
+                header.innerHTML = `
+                    Page ${page.id} (${usagePercent}% 已使用)<br>
+                    <small>${page.usedSpace}/16384 字节</small>
+                `;
+                pageDiv.appendChild(header);
+                
+                // 显示记录
+                page.records.forEach((record, index) => {
+                    const recordDiv = document.createElement('div');
+                    recordDiv.className = 'record';
+                    if (index === page.records.length - 1) {
+                        recordDiv.classList.add('new');
+                    }
+                    recordDiv.innerHTML = `
+                        <strong>ID:${record.id}</strong> ${record.name}<br>
+                        <small>${record.age}岁 ${record.city} (${record.size}B)</small>
+                    `;
+                    pageDiv.appendChild(recordDiv);
+                });
+                
+                // 显示剩余空间
+                const remainingSpace = 15360 - (page.usedSpace - 1024); // 可用空间 - 已用数据空间
+                const freeSpaceDiv = document.createElement('div');
+                freeSpaceDiv.className = 'record';
+                freeSpaceDiv.style.background = '#f0f8ff';
+                freeSpaceDiv.style.borderColor = '#87ceeb';
+                freeSpaceDiv.innerHTML = `
+                    <small>剩余空间: ${remainingSpace} 字节</small><br>
+                    <small>约可存储 ${Math.floor(remainingSpace / 4000)} 条记录 (4KB/条)</small>
+                `;
+                pageDiv.appendChild(freeSpaceDiv);
+                
+                container.appendChild(pageDiv);
+            });
+        }
+
+        function demonstratePageConnection() {
+            updateStatus('演示步骤2：Page如何连接形成B+树结构');
+            addLog('开始演示Page连接成B+树的过程', 'info');
+            
+            if (pages.length === 0) {
+                addLog('请先执行步骤1：数据存储进Page', 'warning');
+                return;
+            }
+            
+            const btreeStructure = document.getElementById('btreeStructure');
+            btreeStructure.innerHTML = '';
+            
+            // 创建根节点
+            const rootLevel = document.createElement('div');
+            rootLevel.className = 'btree-level';
+            
+            const rootPage = document.createElement('div');
+            rootPage.className = 'page root';
+            rootPage.innerHTML = `
+                <div class="page-header">Root Page</div>
+                <div class="record">索引指针 → Page 1-${pages.length}</div>
+            `;
+            rootLevel.appendChild(rootPage);
+            btreeStructure.appendChild(rootLevel);
+            
+            addLog('创建根节点Page，包含指向叶子节点的索引指针', 'success');
+            
+            // 连接线
+            const connectionLine = document.createElement('div');
+            connectionLine.className = 'connection-line';
+            btreeStructure.appendChild(connectionLine);
+            
+            // 叶子节点层
+            const leafLevel = document.createElement('div');
+            leafLevel.className = 'btree-level';
+            
+            pages.forEach((page, index) => {
+                const pageDiv = document.createElement('div');
+                pageDiv.className = 'page leaf';
+                
+                const header = document.createElement('div');
+                header.className = 'page-header';
+                header.innerHTML = `Leaf Page ${page.id} (${Math.floor((page.usedSpace/16384)*100)}%满)`;
+                pageDiv.appendChild(header);
+                
+                page.records.forEach(record => {
+                    const recordDiv = document.createElement('div');
+                    recordDiv.className = 'record';
+                    recordDiv.innerHTML = `ID:${record.id} ${record.name} (${(record.size/1024).toFixed(1)}KB)`;
+                    pageDiv.appendChild(recordDiv);
+                });
+                
+                // 添加指向下一个页面的指针
+                if (index < pages.length - 1) {
+                    const pointer = document.createElement('div');
+                    pointer.className = 'record';
+                    pointer.style.background = '#ffe6e6';
+                    pointer.innerHTML = `→ Page ${pages[index + 1].id}`;
+                    pageDiv.appendChild(pointer);
+                }
+                
+                leafLevel.appendChild(pageDiv);
+            });
+            
+            btreeStructure.appendChild(leafLevel);
+            addLog(`创建${pages.length}个叶子节点Page，并建立连接指针`, 'success');
+            updateStatus('B+树结构构建完成，Page之间已建立连接');
+        }
+        
+        // 添加查询演示功能
+        async function demonstrateQuery() {
+            updateStatus('演示步骤4：模拟查询操作 - 从磁盘读取页面到Buffer Pool');
+            addLog('开始演示查询操作...', 'info');
+            
+            if (pages.length === 0) {
+                addLog('没有数据可查询，请先执行数据存储演示', 'warning');
+                return;
+            }
+            
+            // 模拟查询不同的记录
+            const queryIds = [1, 5, 10, 15];
+            
+            for (const queryId of queryIds) {
+                addLog(`🔍 查询 ID=${queryId} 的记录...`, 'info');
+                
+                // 查找包含该记录的页面
+                let targetPage = null;
+                for (const page of pages) {
+                    if (page.records.some(record => record.id === queryId)) {
+                        targetPage = page;
+                        break;
+                    }
+                }
+                
+                if (targetPage) {
+                    addLog(`📖 在 Page ${targetPage.id} 中找到记录`, 'info');
+                    
+                    // 模拟从磁盘读取页面到Buffer Pool
+                    addLog(`💾 从磁盘读取 Page ${targetPage.id} (16KB) 到 Buffer Pool...`, 'info');
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                    
+                    const record = targetPage.records.find(r => r.id === queryId);
+                    if (record) {
+                        addLog(`✅ 查询成功：ID=${record.id}, 姓名=${record.name}, 年龄=${record.age}, 城市=${record.city}`, 'success');
+                        addLog(`📊 页面信息：Page ${targetPage.id}, 使用率${Math.floor((targetPage.usedSpace/16384)*100)}%, 包含${targetPage.records.length}条记录`, 'info');
+                    }
+                } else {
+                    addLog(`❌ 未找到 ID=${queryId} 的记录`, 'warning');
+                }
+                
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            }
+            
+            addLog('🎉 查询演示完成！', 'success');
+            updateStatus('查询演示完成 - 展示了页面从磁盘到Buffer Pool的读取过程');
+        }
+
+        // 全局变量用于跟踪操作状态
+        let isOperationRunning = false;
+        let currentOperation = null;
+
+        // 启动磁盘到Buffer Pool的演示
+        async function startDiskToBufferDemo() {
+            if (isOperationRunning) {
+                addLog('⚠️ 操作正在进行中，请等待完成', 'warning');
+                return;
+            }
+            
+            if (pages.length === 0) {
+                addLog('请先执行前面的步骤创建Page', 'warning');
+                return;
+            }
+            
+            isOperationRunning = true;
+            currentOperation = 'read';
+            updateOperationStatus('🔄', '正在执行磁盘读取操作...');
+            
+            try {
+                await demonstrateDiskToBuffer();
+            } finally {
+                isOperationRunning = false;
+                currentOperation = null;
+                updateOperationStatus('✅', '磁盘读取操作完成');
+            }
+        }
+
+        // 启动Buffer Pool到磁盘的演示
+        async function startBufferToDiskDemo() {
+            if (isOperationRunning) {
+                addLog('⚠️ 操作正在进行中，请等待完成', 'warning');
+                return;
+            }
+            
+            if (bufferPoolManager.flushList.length === 0) {
+                addLog('⚠️ Buffer Pool中没有脏页，先执行读取操作或创建脏页', 'warning');
+                return;
+            }
+            
+            isOperationRunning = true;
+            currentOperation = 'write';
+            updateOperationStatus('🔄', '正在执行Buffer Pool写回操作...');
+            
+            try {
+                await demonstrateBufferToDisk();
+            } finally {
+                isOperationRunning = false;
+                currentOperation = null;
+                updateOperationStatus('✅', 'Buffer Pool写回操作完成');
+            }
+        }
+
+        // 重置演示
+        function resetDemo() {
+            if (isOperationRunning) {
+                addLog('⚠️ 操作正在进行中，无法重置', 'warning');
+                return;
+            }
+            
+            // 重置所有状态
+            resetAllSteps();
+            resetFlowAnimations();
+            
+            // 重置Buffer Pool管理器
+            bufferPoolManager.usedPages = 0;
+            bufferPoolManager.hitCount = 0;
+            bufferPoolManager.missCount = 0;
+            bufferPoolManager.lruList = [];
+            bufferPoolManager.flushList = [];
+            
+            // 重置统计数据
+            document.getElementById('poolReadCount').textContent = '0';
+            document.getElementById('poolWriteCount').textContent = '0';
+            document.getElementById('poolDirtyCount').textContent = '0';
+            document.getElementById('poolUsedSize').textContent = '0MB';
+            document.getElementById('poolHitRate').textContent = '0%';
+            
+            // 重置磁盘状态
+            document.getElementById('currentTrack').textContent = '0';
+            document.getElementById('currentSector').textContent = '0';
+            document.getElementById('seekTime').textContent = '0ms';
+            document.getElementById('rotationDelay').textContent = '0ms';
+            document.getElementById('transferTime').textContent = '0ms';
+            document.getElementById('totalIOTime').textContent = '0ms';
+            
+            // 重新初始化
+            initializeDiskStructure();
+            initializeBufferPool();
+            
+            updateOperationStatus('⏸️', '等待操作...');
+            addLog('🔄 演示已重置', 'info');
+        }
+
+        // 更新操作状态
+        function updateOperationStatus(indicator, text) {
+            document.getElementById('statusIndicator').textContent = indicator;
+            document.getElementById('statusText').textContent = text;
+        }
+
+        // 重置所有步骤状态
+        function resetAllSteps() {
+            // 重置读取流程步骤
+            for (let i = 1; i <= 5; i++) {
+                const step = document.getElementById(`read-step-${i}`);
+                if (step) {
+                    step.classList.remove('active', 'completed');
+                    const status = step.querySelector('.step-status');
+                    if (status) status.textContent = '待执行';
+                }
+            }
+            
+            // 重置写入流程步骤
+            for (let i = 1; i <= 5; i++) {
+                const step = document.getElementById(`write-step-${i}`);
+                if (step) {
+                    step.classList.remove('active', 'completed');
+                    const status = step.querySelector('.step-status');
+                    if (status) status.textContent = '待执行';
+                }
+            }
+            
+            // 重置进度指示器
+            const progressSteps = ['seek-progress', 'rotation-progress', 'io-progress', 'transfer-progress',
+                                 'cache-check-progress', 'page-manage-progress', 'lru-update-progress'];
+            progressSteps.forEach(id => {
+                const element = document.getElementById(id);
+                if (element) {
+                    element.classList.remove('active', 'completed');
+                    const status = element.querySelector('.progress-status');
+                    if (status) status.textContent = '待执行';
+                }
+            });
+        }
+
+        // 重置流动动画
+        function resetFlowAnimations() {
+            const readFlow = document.getElementById('readDataFlow');
+            const writeFlow = document.getElementById('writeDataFlow');
+            const flowLabel = document.getElementById('flowLabel');
+            
+            if (readFlow) readFlow.classList.remove('active');
+            if (writeFlow) writeFlow.classList.remove('active');
+            if (flowLabel) flowLabel.textContent = '等待操作...';
+        }
+
+        async function demonstrateDiskToBuffer() {
+            addLog('🚀 开始演示磁盘物理结构读取到Buffer Pool的完整过程', 'info');
+            
+            // 初始化磁盘物理结构和Buffer Pool
+            initializeDiskStructure();
+            initializeBufferPool();
+            
+            // 激活读取流程和流动动画
+            const readFlow = document.getElementById('readDataFlow');
+            const flowLabel = document.getElementById('flowLabel');
+            if (readFlow) readFlow.classList.add('active');
+            if (flowLabel) flowLabel.textContent = '📖 磁盘 → Buffer Pool';
+            
+            // 获取读取流程步骤元素
+            const readSteps = [
+                document.getElementById('read-step-1'),
+                document.getElementById('read-step-2'),
+                document.getElementById('read-step-3'),
+                document.getElementById('read-step-4'),
+                document.getElementById('read-step-5')
+            ];
+            
+            // 获取进度指示器元素
+            const progressSteps = [
+                document.getElementById('seek-progress'),
+                document.getElementById('rotation-progress'),
+                document.getElementById('io-progress'),
+                document.getElementById('transfer-progress')
+            ];
+            
+            const bufferProgressSteps = [
+                document.getElementById('cache-check-progress'),
+                document.getElementById('page-manage-progress'),
+                document.getElementById('lru-update-progress')
+            ];
+            
+            // 模拟查询请求
+            const pageToQuery = pages[0];
+            const randomId = pageToQuery.records.length > 0 ? 
+                pageToQuery.records[Math.floor(Math.random() * pageToQuery.records.length)].id : 1;
+            
+            // 步骤1：SQL查询请求
+            await updateReadStep(1, 'active', '执行中');
+            addLog(`📝 收到SQL查询: SELECT * FROM users WHERE id = ${randomId}`, 'info');
+            await sleep(1500);
+            await updateReadStep(1, 'completed', '完成');
+            
+            // 步骤2：Buffer Pool检查
+            await updateReadStep(2, 'active', '检查中');
+            await updateProgressStep('cache-check-progress', 'active', '检查中');
+            addLog(`🔍 检查Buffer Pool缓存...`, 'info');
+            await sleep(1000);
+            
+            // 检查LRU链表中是否有该页面
+            const bufferPage = bufferPoolManager.lruList.find(page => page.id === pageToQuery.id);
+            
+            if (bufferPage) {
+                // 缓存命中
+                bufferPoolManager.hitCount++;
+                addLog(`✅ Buffer Pool缓存命中！Page ${pageToQuery.id} 已在LRU链表中`, 'success');
+                
+                await updateReadStep(2, 'completed', '命中');
+                await updateProgressStep('cache-check-progress', 'completed', '命中');
+                
+                // 更新统计
+                updateBufferPoolStats();
+                
+                // 将页面移到LRU链表头部
+                const pageIndex = bufferPoolManager.lruList.indexOf(bufferPage);
+                bufferPoolManager.lruList.splice(pageIndex, 1);
+                bufferPoolManager.lruList.unshift(bufferPage);
+                renderBufferPoolStructure();
+                
+                addLog(`🔄 页面已移至LRU链表头部`, 'info');
+                
+                // 显示查询结果
+                const record = pageToQuery.records.find(r => r.id === randomId);
+                if (record) {
+                    addLog(`📊 查询结果: ID=${record.id}, 姓名=${record.name}, 年龄=${record.age}, 城市=${record.city}`, 'success');
+                }
+            } else {
+                // 缓存未命中，需要从磁盘读取
+                bufferPoolManager.missCount++;
+                addLog(`⚠️ Buffer Pool缓存未命中！需要从磁盘读取Page ${pageToQuery.id}`, 'warning');
+                
+                await updateReadStep(2, 'completed', '未命中');
+                await updateProgressStep('cache-check-progress', 'completed', '未命中');
+                
+                // 步骤3：磁盘寻址
+                await updateReadStep(3, 'active', '寻址中');
+                await updateProgressStep('seek-progress', 'active', '寻址中');
+                
+                // 找到页面对应的扇区
+                const pageSector = diskStructure.sectors.find(sector => sector.pageId === pageToQuery.id);
+                if (!pageSector) {
+                    addLog(`❌ 未找到Page ${pageToQuery.id}对应的磁盘扇区`, 'error');
+                    return;
+                }
+                
+                const targetTrack = pageSector.track;
+                const targetSector = pageSector.sector;
+                
+                addLog(`💿 磁盘寻址 - Page ${pageToQuery.id} 位于磁道${targetTrack}扇区${targetSector}`, 'info');
+                
+                // 模拟磁盘寻址时间
+                const seekTime = await simulateDiskSeek(targetTrack, targetSector);
+                addLog(`⚙️ 磁头移动完成，寻址耗时: ${seekTime.toFixed(1)}ms`, 'info');
+                
+                await updateReadStep(3, 'completed', '完成');
+                await updateProgressStep('seek-progress', 'completed', '完成');
+                
+                // 步骤4：磁盘读取
+                await updateReadStep(4, 'active', '读取中');
+                await updateProgressStep('io-progress', 'active', '读取中');
+                
+                addLog(`🔄 开始读取扇区数据 (16KB页面)`, 'info');
+                
+                // 高亮目标扇区
+                pageSector.element.classList.add('reading');
+                
+                // 模拟读取进度
+                for (let progress = 30; progress <= 80; progress += 10) {
+                    addLog(`📊 读取进度：${progress}% (已读取 ${(16 * progress / 100).toFixed(1)}KB)`, 'info');
+                    await sleep(300);
+                }
+                
+                pageSector.element.classList.remove('reading');
+                pageSector.element.classList.add('completed');
+                
+                await updateReadStep(4, 'completed', '完成');
+                await updateProgressStep('io-progress', 'completed', '完成');
+                
+                // 步骤5：加载到Buffer Pool
+                await updateReadStep(5, 'active', '加载中');
+                await updateProgressStep('page-manage-progress', 'active', '加载中');
+                
+                addLog(`📤 通过DMA传输数据到内存`, 'info');
+                await sleep(1000);
+                
+                addLog(`🎯 将页面添加到Buffer Pool`, 'info');
+                
+                // 添加到Buffer Pool
+                const success = addPageToBufferPool(pageToQuery);
+                if (success) {
+                    const totalIOTime = seekTime + 15;
+                    addLog(`✅ Page ${pageToQuery.id} 已成功加载到Buffer Pool`, 'success');
+                    addLog(`⏱️ 总I/O耗时：约${totalIOTime.toFixed(1)}ms (寻址+读取+传输)`, 'info');
+                    
+                    // 更新统计
+                    updateBufferPoolStats();
+                    updateDiskStats(seekTime, totalIOTime);
+                    
+                    await updateReadStep(5, 'completed', '完成');
+                    await updateProgressStep('page-manage-progress', 'completed', '完成');
+                    await updateProgressStep('lru-update-progress', 'completed', 'LRU更新');
+                    
+                    // 页内记录查找
+                    addLog(`🔍 在Page ${pageToQuery.id}内查找记录ID=${randomId}`, 'info');
+                    await sleep(500);
+                    
+                    // 显示查询结果
+                    const record = pageToQuery.records.find(r => r.id === randomId);
+                    if (record) {
+                        addLog(`📊 查询结果: ID=${record.id}, 姓名=${record.name}, 年龄=${record.age}, 城市=${record.city}`, 'success');
+                        addLog(`📈 页面统计: 使用率${Math.floor((pageToQuery.usedSpace/16384)*100)}%, 包含${pageToQuery.records.length}条记录`, 'info');
+                    } else {
+                        addLog(`❌ 在Page ${pageToQuery.id}中未找到ID=${randomId}的记录`, 'warning');
+                    }
+                }
+            }
+            
+            // 总结
+            addLog('🎉 磁盘物理结构到Buffer Pool读取演示完成！', 'success');
+            addLog(`📈 Buffer Pool统计: 命中${bufferPoolManager.hitCount}次, 未命中${bufferPoolManager.missCount}次`, 'info');
+            addLog(`💾 LRU链表包含 ${bufferPoolManager.lruList.length} 个页面`, 'info');
+        }
+
+        // Buffer Pool到磁盘的演示函数
+        async function demonstrateBufferToDisk() {
+            addLog('🚀 开始演示Buffer Pool写回磁盘的完整过程', 'info');
+            
+            // 激活写入流程和流动动画
+            const writeFlow = document.getElementById('writeDataFlow');
+            const flowLabel = document.getElementById('flowLabel');
+            if (writeFlow) writeFlow.classList.add('active');
+            if (flowLabel) flowLabel.textContent = '💾 Buffer Pool → 磁盘';
+            
+            // 获取一个脏页进行写回
+            const dirtyPage = bufferPoolManager.flushList[0];
+            if (!dirtyPage) {
+                addLog('⚠️ 没有脏页需要写回', 'warning');
+                return;
+            }
+            
+            // 步骤1：检查脏页
+            await updateWriteStep(1, 'active', '检查中');
+            addLog(`🔍 检查脏页: Page ${dirtyPage.id}`, 'info');
+            await sleep(1000);
+            await updateWriteStep(1, 'completed', '完成');
+            
+            // 步骤2：准备写回
+            await updateWriteStep(2, 'active', '准备中');
+            addLog(`📝 准备写回Page ${dirtyPage.id}到磁盘`, 'info');
+            await sleep(800);
+            await updateWriteStep(2, 'completed', '完成');
+            
+            // 步骤3：磁盘寻址
+            await updateWriteStep(3, 'active', '寻址中');
+            const pageSector = diskStructure.sectors.find(sector => sector.pageId === dirtyPage.id);
+            if (pageSector) {
+                addLog(`💿 磁盘寻址 - Page ${dirtyPage.id} 位于磁道${pageSector.track}扇区${pageSector.sector}`, 'info');
+                const seekTime = await simulateDiskSeek(pageSector.track, pageSector.sector);
+                addLog(`⚙️ 磁头移动完成，寻址耗时: ${seekTime.toFixed(1)}ms`, 'info');
+            }
+            await updateWriteStep(3, 'completed', '完成');
+            
+            // 步骤4：写入磁盘
+            await updateWriteStep(4, 'active', '写入中');
+            addLog(`💾 开始写入Page ${dirtyPage.id}到磁盘扇区`, 'info');
+            
+            if (pageSector) {
+                pageSector.element.classList.add('writing');
+                
+                // 模拟写入进度
+                for (let progress = 0; progress <= 100; progress += 20) {
+                    addLog(`📊 写入进度：${progress}% (已写入 ${(16 * progress / 100).toFixed(1)}KB)`, 'info');
+                    await sleep(300);
+                }
+                
+                pageSector.element.classList.remove('writing');
+                pageSector.element.classList.add('written');
+            }
+            
+            await updateWriteStep(4, 'completed', '完成');
+            
+            // 步骤5：更新状态
+            await updateWriteStep(5, 'active', '更新中');
+            addLog(`🔄 更新Buffer Pool状态`, 'info');
+            
+            // 从Flush链表中移除
+            const flushIndex = bufferPoolManager.flushList.indexOf(dirtyPage);
+            if (flushIndex > -1) {
+                bufferPoolManager.flushList.splice(flushIndex, 1);
+            }
+            
+            // 标记为非脏页
+            dirtyPage.isDirty = false;
+            
+            addLog(`✅ Page ${dirtyPage.id} 已成功写回磁盘`, 'success');
+            updateBufferPoolStats();
+            
+            await updateWriteStep(5, 'completed', '完成');
+            
+            // 清理扇区状态
+            if (pageSector) {
+                setTimeout(() => {
+                    pageSector.element.classList.remove('written');
+                }, 3000);
+            }
+            
+            addLog('🎉 Buffer Pool写回磁盘演示完成！', 'success');
+        }
+
+        // 辅助函数：更新读取流程步骤
+        async function updateReadStep(stepNum, status, text) {
+            const step = document.getElementById(`read-step-${stepNum}`);
+            if (step) {
+                step.classList.remove('active', 'completed');
+                step.classList.add(status);
+                const statusElement = step.querySelector('.step-status');
+                if (statusElement) statusElement.textContent = text;
+            }
+        }
+
+        // 辅助函数：更新写入流程步骤
+        async function updateWriteStep(stepNum, status, text) {
+            const step = document.getElementById(`write-step-${stepNum}`);
+            if (step) {
+                step.classList.remove('active', 'completed');
+                step.classList.add(status);
+                const statusElement = step.querySelector('.step-status');
+                if (statusElement) statusElement.textContent = text;
+            }
+        }
+
+        // 辅助函数：更新进度步骤
+        async function updateProgressStep(stepId, status, text) {
+            const step = document.getElementById(stepId);
+            if (step) {
+                step.classList.remove('active', 'completed');
+                step.classList.add(status);
+                const statusElement = step.querySelector('.progress-status');
+                if (statusElement) statusElement.textContent = text;
+            }
+        }
+
+        // 辅助函数：更新Buffer Pool统计
+        function updateBufferPoolStats() {
+            document.getElementById('poolReadCount').textContent = bufferPoolManager.hitCount + bufferPoolManager.missCount;
+            document.getElementById('poolWriteCount').textContent = bufferPoolManager.flushList.length;
+            document.getElementById('poolDirtyCount').textContent = bufferPoolManager.flushList.length;
+            document.getElementById('poolUsedSize').textContent = Math.round(bufferPoolManager.usedPages * 16 / 1024) + 'MB';
+            
+            const totalAccess = bufferPoolManager.hitCount + bufferPoolManager.missCount;
+            const hitRate = totalAccess > 0 ? Math.round((bufferPoolManager.hitCount / totalAccess) * 100) : 0;
+            document.getElementById('poolHitRate').textContent = hitRate + '%';
+        }
+
+        // 辅助函数：更新磁盘统计
+        function updateDiskStats(seekTime = 0, totalTime = 0) {
+            document.getElementById('seekTime').textContent = seekTime.toFixed(1) + 'ms';
+            document.getElementById('rotationDelay').textContent = '4.2ms';
+            document.getElementById('transferTime').textContent = '10.8ms';
+            document.getElementById('totalIOTime').textContent = totalTime.toFixed(1) + 'ms';
+        }
+
+
+
+
+
+        function renderDiskPages() {
+            const container = document.getElementById('diskPages');
+            container.innerHTML = '';
+            
+            pages.forEach(page => {
+                const pageDiv = document.createElement('div');
+                pageDiv.className = `page ${page.type}`;
+                pageDiv.setAttribute('data-page-id', page.id);
+                
+                const header = document.createElement('div');
+                header.className = 'page-header';
+                header.textContent = `Page ${page.id}`;
+                pageDiv.appendChild(header);
+                
+                page.records.forEach(record => {
+                    const recordDiv = document.createElement('div');
+                    recordDiv.className = 'record';
+                    recordDiv.innerHTML = `ID:${record.id}`;
+                    pageDiv.appendChild(recordDiv);
+                });
+                
+                container.appendChild(pageDiv);
+            });
+        }
+
+        function renderBufferPoolPages() {
+            const container = document.getElementById('bufferPoolPages');
+            container.innerHTML = '';
+            
+            bufferPoolPages.forEach(page => {
+                const pageDiv = document.createElement('div');
+                pageDiv.className = `page ${page.type}`;
+                pageDiv.style.borderColor = '#16a085';
+                
+                const header = document.createElement('div');
+                header.className = 'page-header';
+                header.style.background = '#16a085';
+                header.textContent = `Page ${page.id} (Buffer)`;
+                pageDiv.appendChild(header);
+                
+                page.records.forEach(record => {
+                    const recordDiv = document.createElement('div');
+                    recordDiv.className = 'record';
+                    recordDiv.innerHTML = `ID:${record.id}`;
+                    pageDiv.appendChild(recordDiv);
+                });
+                
+                container.appendChild(pageDiv);
+            });
+        }
+
+        async function demonstrateComplete() {
+            updateStatus('开始完整演示流程...');
+            addLog('🎬 开始完整的Page存储演示流程', 'info');
+            reset();
+            
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // 步骤1：数据存储
+            await demonstrateDataStorage();
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // 步骤2：页面连接
+            await demonstratePageConnection();
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // 步骤3：磁盘到Buffer Pool
+            await demonstrateDiskToBuffer();
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            
+            // 步骤4：查询演示
+            await demonstrateQuery();
+            
+            addLog('🎉 完整演示流程结束！', 'success');
+            updateStatus('完整演示流程已完成 - 包含数据存储、页面连接、磁盘读取和查询操作');
+        }
+
+        function reset() {
+            recordId = 1;
+            pageId = 1;
+            pages = [];
+            bufferPoolPages = [];
+            currentStep = 0;
+            
+            document.getElementById('dataInputArea').innerHTML = '';
+            document.getElementById('storagePages').innerHTML = '';
+            document.getElementById('btreeStructure').innerHTML = '';
+            document.getElementById('diskPages').innerHTML = '';
+            document.getElementById('bufferPoolPages').innerHTML = '';
+            document.getElementById('operationLog').innerHTML = '';
+            
+            updateStatus('演示已重置，准备开始新的完整演示');
+            addLog('系统已重置，可以开始新的演示', 'success');
+        }
+
+
+
+
+
+
+
+        // 页面初始化
+        function initializePage() {
+            // 初始化操作状态
+            updateOperationStatus('ready', '系统就绪，请选择操作');
+            
+            // 初始化磁盘和Buffer Pool
+            initializeDiskStructure();
+            initializeBufferPool();
+            
+            // 重置所有步骤
+            resetAllSteps();
+            
+            // 更新统计信息
+            updateBufferPoolStats();
+            updateDiskStats();
+            
+            addLog('MySQL Page存储结构完整演示系统已启动', 'success');
+            updateStatus('系统就绪，点击按钮开始演示各个步骤');
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            initializePage();
+        });
+
+        // 初始化
+        initializePage();
+    </script>
+</body>
+</html>

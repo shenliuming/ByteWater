@@ -1,0 +1,938 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MySQL 双写缓冲(DWB)机制动画演示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #ff6b6b 0%, #ee5a24 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .container {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            padding: 40px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        .controls {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .btn {
+            background: linear-gradient(45deg, #ff6b6b, #ee5a24);
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            cursor: pointer;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+        }
+
+        .scenario-selector {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .scenario-btn {
+            background: #f8f9fa;
+            color: #333;
+            border: 2px solid #ddd;
+            padding: 10px 20px;
+            border-radius: 20px;
+            margin: 0 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .scenario-btn.active {
+            background: #ff6b6b;
+            color: white;
+            border-color: #ff6b6b;
+        }
+
+        .dwb-flow {
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+
+        .flow-section {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 20px;
+            border: 2px solid #ddd;
+            position: relative;
+        }
+
+        .section-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 20px;
+            padding: 10px;
+            border-radius: 8px;
+            color: white;
+        }
+
+        .buffer-title {
+            background: #4ecdc4;
+        }
+
+        .dwb-title {
+            background: #ff6b6b;
+        }
+
+        .disk-title {
+            background: #95a5a6;
+        }
+
+        .page-container {
+            background: white;
+            border: 2px solid #ddd;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            overflow: hidden;
+            transition: all 0.3s ease;
+        }
+
+        .page-container.writing {
+            border-color: #ff6b6b;
+            box-shadow: 0 0 15px rgba(255, 107, 107, 0.3);
+            animation: writePulse 1s infinite;
+        }
+
+        .page-container.written {
+            border-color: #4caf50;
+            background: #e8f5e8;
+        }
+
+        @keyframes writePulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+
+        .page-header {
+            background: #667eea;
+            color: white;
+            padding: 8px;
+            text-align: center;
+            font-weight: bold;
+            font-size: 0.9em;
+        }
+
+        .page-content {
+            padding: 15px;
+            text-align: center;
+        }
+
+        .page-data {
+            background: #e3f2fd;
+            border: 1px solid #2196f3;
+            border-radius: 5px;
+            padding: 8px;
+            margin: 5px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 0.8em;
+        }
+
+        .page-data.dirty {
+            background: #fff3e0;
+            border-color: #ff9800;
+        }
+
+        .page-data.new {
+            background: #c8e6c9;
+            border-color: #4caf50;
+            animation: newDataPulse 1s ease;
+        }
+
+        @keyframes newDataPulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.05); }
+        }
+
+        .arrow {
+            position: absolute;
+            top: 50%;
+            right: -30px;
+            font-size: 2em;
+            color: #ff6b6b;
+            animation: arrowPulse 1s infinite;
+            z-index: 10;
+        }
+
+        .arrow.hidden {
+            display: none;
+        }
+
+        @keyframes arrowPulse {
+            0%, 100% { opacity: 0.5; transform: translateY(-50%) scale(1); }
+            50% { opacity: 1; transform: translateY(-50%) scale(1.1); }
+        }
+
+        .step-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 30px;
+            flex-wrap: wrap;
+        }
+
+        .step {
+            background: #ddd;
+            color: #666;
+            padding: 10px 15px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+            margin: 5px;
+            flex: 1;
+            text-align: center;
+            min-width: 150px;
+        }
+
+        .step.active {
+            background: #ff6b6b;
+            color: white;
+            transform: scale(1.05);
+        }
+
+        .step.completed {
+            background: #4caf50;
+            color: white;
+        }
+
+        .operation-log {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            max-height: 250px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+
+        .log-entry {
+            margin-bottom: 5px;
+            padding: 5px;
+            border-radius: 3px;
+        }
+
+        .log-entry.write {
+            background: rgba(255, 152, 0, 0.2);
+        }
+
+        .log-entry.success {
+            background: rgba(76, 175, 80, 0.2);
+        }
+
+        .log-entry.error {
+            background: rgba(244, 67, 54, 0.2);
+        }
+
+        .log-entry.info {
+            background: rgba(33, 150, 243, 0.2);
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-bottom: 20px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #ff6b6b, #ee5a24);
+            color: white;
+            padding: 20px;
+            border-radius: 15px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .crash-simulation {
+            background: #ffebee;
+            border: 2px solid #f44336;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .crash-btn {
+            background: #f44336;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 20px;
+            cursor: pointer;
+            margin: 0 10px;
+        }
+
+        .recovery-info {
+            background: #e8f5e8;
+            border: 2px solid #4caf50;
+            border-radius: 15px;
+            padding: 20px;
+            margin-top: 20px;
+        }
+
+        .dwb-area {
+            background: #fff5f5;
+            border: 2px dashed #ff6b6b;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+        }
+
+        .dwb-area h4 {
+            color: #ff6b6b;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .dwb-pages {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .dwb-page {
+            background: white;
+            border: 1px solid #ff6b6b;
+            border-radius: 5px;
+            padding: 10px;
+            text-align: center;
+            font-size: 0.8em;
+            transition: all 0.3s ease;
+        }
+
+        .dwb-page.writing {
+            background: #ffebee;
+            animation: dwbWritePulse 0.5s infinite;
+        }
+
+        @keyframes dwbWritePulse {
+            0%, 100% { background: #ffebee; }
+            50% { background: #ffcdd2; }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🛡️ MySQL 双写缓冲(DWB)机制</h1>
+        <p>深入理解双写缓冲如何防止页面损坏和数据丢失</p>
+    </div>
+
+    <div class="container">
+        <div class="controls">
+            <button class="btn" onclick="startNormalWrite()">正常写入演示</button>
+            <button class="btn" onclick="startCrashSimulation()">崩溃恢复演示</button>
+            <button class="btn" onclick="resetDemo()">重置演示</button>
+        </div>
+
+        <div class="scenario-selector">
+            <button class="scenario-btn active" onclick="selectScenario('normal')">正常写入场景</button>
+            <button class="scenario-btn" onclick="selectScenario('crash')">系统崩溃场景</button>
+            <button class="scenario-btn" onclick="selectScenario('recovery')">恢复场景</button>
+        </div>
+
+        <div class="step-indicator">
+            <div class="step" id="step1">1. 脏页产生</div>
+            <div class="step" id="step2">2. 写入DWB</div>
+            <div class="step" id="step3">3. 顺序写入</div>
+            <div class="step" id="step4">4. 写入实际位置</div>
+            <div class="step" id="step5">5. 随机写入</div>
+            <div class="step" id="step6">6. 完成写入</div>
+        </div>
+
+        <div class="dwb-flow">
+            <div class="flow-section">
+                <div class="section-title buffer-title">Buffer Pool</div>
+                <div class="page-container" id="bufferPage1">
+                    <div class="page-header">Page 100 (脏页)</div>
+                    <div class="page-content">
+                        <div class="page-data dirty" id="bufferData1">
+                            id=1, name='张三', age=25<br>
+                            id=2, name='李四', age=28 (新增)
+                        </div>
+                        <div style="margin-top: 10px; font-size: 0.8em; color: #666;">
+                            LSN: 12345<br>
+                            Dirty: Yes
+                        </div>
+                    </div>
+                </div>
+                <div class="page-container" id="bufferPage2">
+                    <div class="page-header">Page 200 (脏页)</div>
+                    <div class="page-content">
+                        <div class="page-data dirty" id="bufferData2">
+                            id=3, name='王五', age=30<br>
+                            id=4, name='赵六', age=32 (修改)
+                        </div>
+                        <div style="margin-top: 10px; font-size: 0.8em; color: #666;">
+                            LSN: 12346<br>
+                            Dirty: Yes
+                        </div>
+                    </div>
+                </div>
+                <div class="arrow" id="arrow1">➡️</div>
+            </div>
+
+            <div class="flow-section">
+                <div class="section-title dwb-title">Double Write Buffer</div>
+                <div class="dwb-area">
+                    <h4>DWB区域 (2MB, 128页)</h4>
+                    <div class="dwb-pages">
+                        <div class="dwb-page" id="dwbPage1">
+                            <div>Slot 1</div>
+                            <div style="font-size: 0.7em; color: #666;">空闲</div>
+                        </div>
+                        <div class="dwb-page" id="dwbPage2">
+                            <div>Slot 2</div>
+                            <div style="font-size: 0.7em; color: #666;">空闲</div>
+                        </div>
+                        <div class="dwb-page" id="dwbPage3">
+                            <div>Slot 3</div>
+                            <div style="font-size: 0.7em; color: #666;">空闲</div>
+                        </div>
+                        <div class="dwb-page" id="dwbPage4">
+                            <div>Slot 4</div>
+                            <div style="font-size: 0.7em; color: #666;">空闲</div>
+                        </div>
+                    </div>
+                </div>
+                <div style="text-align: center; margin-top: 15px;">
+                    <div style="font-size: 0.9em; color: #666;">
+                        写入方式: 顺序写入<br>
+                        性能: 高效
+                    </div>
+                </div>
+                <div class="arrow" id="arrow2">➡️</div>
+            </div>
+
+            <div class="flow-section">
+                <div class="section-title disk-title">磁盘数据文件</div>
+                <div class="page-container" id="diskPage1">
+                    <div class="page-header">Page 100 (原始)</div>
+                    <div class="page-content">
+                        <div class="page-data" id="diskData1">
+                            id=1, name='张三', age=25<br>
+                            (原始数据)
+                        </div>
+                        <div style="margin-top: 10px; font-size: 0.8em; color: #666;">
+                            LSN: 12340<br>
+                            Status: 原始
+                        </div>
+                    </div>
+                </div>
+                <div class="page-container" id="diskPage2">
+                    <div class="page-header">Page 200 (原始)</div>
+                    <div class="page-content">
+                        <div class="page-data" id="diskData2">
+                            id=3, name='王五', age=30<br>
+                            (原始数据)
+                        </div>
+                        <div style="margin-top: 10px; font-size: 0.8em; color: #666;">
+                            LSN: 12341<br>
+                            Status: 原始
+                        </div>
+                    </div>
+                </div>
+                <div style="text-align: center; margin-top: 15px;">
+                    <div style="font-size: 0.9em; color: #666;">
+                        写入方式: 随机写入<br>
+                        性能: 较低
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats">
+            <div class="stat-card">
+                <div class="stat-value" id="dwbWrites">0</div>
+                <div class="stat-label">DWB写入次数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="diskWrites">0</div>
+                <div class="stat-label">磁盘写入次数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="pagesProtected">0</div>
+                <div class="stat-label">保护页面数</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value" id="crashRecoveries">0</div>
+                <div class="stat-label">崩溃恢复次数</div>
+            </div>
+        </div>
+
+        <div class="crash-simulation" id="crashSimulation" style="display: none;">
+            <h3>🚨 系统崩溃模拟</h3>
+            <p>模拟在不同阶段发生系统崩溃的情况</p>
+            <button class="crash-btn" onclick="simulateCrash('dwb')">DWB写入时崩溃</button>
+            <button class="crash-btn" onclick="simulateCrash('disk')">磁盘写入时崩溃</button>
+            <button class="crash-btn" onclick="recoverFromCrash()">启动恢复</button>
+        </div>
+
+        <div class="operation-log" id="operationLog">
+            <div class="log-entry info">双写缓冲演示已启动...</div>
+        </div>
+
+        <div class="recovery-info" id="recoveryInfo" style="display: none;">
+            <h3>🔧 恢复机制说明</h3>
+            <p><strong>DWB的作用：</strong></p>
+            <ul>
+                <li>防止页面半写问题（partial page write）</li>
+                <li>在系统崩溃时提供完整的页面副本</li>
+                <li>确保数据文件的一致性</li>
+            </ul>
+            <p><strong>恢复过程：</strong></p>
+            <ol>
+                <li>检查DWB中的页面</li>
+                <li>验证页面完整性</li>
+                <li>如果数据文件页面损坏，从DWB恢复</li>
+                <li>重新应用Redo Log</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        class DoubleWriteBufferDemo {
+            constructor() {
+                this.dwbWrites = 0;
+                this.diskWrites = 0;
+                this.pagesProtected = 0;
+                this.crashRecoveries = 0;
+                this.currentScenario = 'normal';
+                this.crashPoint = null;
+                this.initializeUI();
+            }
+
+            initializeUI() {
+                this.updateStats();
+            }
+
+            selectScenario(scenario) {
+                this.currentScenario = scenario;
+                
+                // 更新按钮状态
+                document.querySelectorAll('.scenario-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                event.target.classList.add('active');
+                
+                // 显示/隐藏相关UI
+                const crashSim = document.getElementById('crashSimulation');
+                const recoveryInfo = document.getElementById('recoveryInfo');
+                
+                if (scenario === 'crash') {
+                    crashSim.style.display = 'block';
+                    recoveryInfo.style.display = 'none';
+                } else if (scenario === 'recovery') {
+                    crashSim.style.display = 'none';
+                    recoveryInfo.style.display = 'block';
+                } else {
+                    crashSim.style.display = 'none';
+                    recoveryInfo.style.display = 'none';
+                }
+                
+                this.log(`切换到${scenario === 'normal' ? '正常写入' : scenario === 'crash' ? '崩溃模拟' : '恢复'}场景`, 'info');
+            }
+
+            async startNormalWrite() {
+                this.log('开始正常的双写缓冲写入流程', 'info');
+                await this.executeNormalWriteSteps();
+            }
+
+            async executeNormalWriteSteps() {
+                // 步骤1: 脏页产生
+                await this.activateStep(1, '事务提交，Buffer Pool中产生脏页');
+                this.highlightDirtyPages();
+                
+                // 步骤2: 写入DWB
+                await this.activateStep(2, '将脏页先写入Double Write Buffer');
+                await this.writeToDWB();
+                
+                // 步骤3: 顺序写入完成
+                await this.activateStep(3, 'DWB顺序写入完成，性能高效');
+                
+                // 步骤4: 写入实际位置
+                await this.activateStep(4, '从DWB写入到数据文件的实际位置');
+                await this.writeToDisk();
+                
+                // 步骤5: 随机写入
+                await this.activateStep(5, '随机写入到磁盘，性能相对较低');
+                
+                // 步骤6: 完成写入
+                await this.activateStep(6, '双写缓冲写入流程完成');
+                this.completeWrite();
+                
+                this.updateStats();
+            }
+
+            async activateStep(stepNum, description) {
+                // 重置所有步骤
+                for (let i = 1; i <= 6; i++) {
+                    const step = document.getElementById(`step${i}`);
+                    step.classList.remove('active', 'completed');
+                }
+                
+                // 激活当前步骤
+                const currentStep = document.getElementById(`step${stepNum}`);
+                currentStep.classList.add('active');
+                
+                // 标记之前的步骤为完成
+                for (let i = 1; i < stepNum; i++) {
+                    document.getElementById(`step${i}`).classList.add('completed');
+                }
+                
+                this.log(`步骤${stepNum}: ${description}`, 'info');
+                await this.sleep(1500);
+            }
+
+            highlightDirtyPages() {
+                const bufferPage1 = document.getElementById('bufferPage1');
+                const bufferPage2 = document.getElementById('bufferPage2');
+                
+                bufferPage1.classList.add('writing');
+                bufferPage2.classList.add('writing');
+                
+                setTimeout(() => {
+                    bufferPage1.classList.remove('writing');
+                    bufferPage2.classList.remove('writing');
+                }, 1000);
+            }
+
+            async writeToDWB() {
+                this.dwbWrites++;
+                
+                // 显示箭头动画
+                const arrow1 = document.getElementById('arrow1');
+                arrow1.style.display = 'block';
+                
+                // 写入DWB槽位
+                const dwbPage1 = document.getElementById('dwbPage1');
+                const dwbPage2 = document.getElementById('dwbPage2');
+                
+                dwbPage1.classList.add('writing');
+                dwbPage1.innerHTML = `
+                    <div>Slot 1</div>
+                    <div style="font-size: 0.7em; color: #ff6b6b;">写入中...</div>
+                `;
+                
+                await this.sleep(800);
+                
+                dwbPage1.classList.remove('writing');
+                dwbPage1.innerHTML = `
+                    <div>Slot 1</div>
+                    <div style="font-size: 0.7em; color: #4caf50;">Page 100</div>
+                `;
+                
+                dwbPage2.classList.add('writing');
+                dwbPage2.innerHTML = `
+                    <div>Slot 2</div>
+                    <div style="font-size: 0.7em; color: #ff6b6b;">写入中...</div>
+                `;
+                
+                await this.sleep(800);
+                
+                dwbPage2.classList.remove('writing');
+                dwbPage2.innerHTML = `
+                    <div>Slot 2</div>
+                    <div style="font-size: 0.7em; color: #4caf50;">Page 200</div>
+                `;
+                
+                this.log('脏页已成功写入Double Write Buffer', 'success');
+                this.pagesProtected += 2;
+                
+                // 隐藏箭头
+                setTimeout(() => {
+                    arrow1.style.display = 'none';
+                }, 500);
+            }
+
+            async writeToDisk() {
+                this.diskWrites++;
+                
+                // 显示箭头动画
+                const arrow2 = document.getElementById('arrow2');
+                arrow2.style.display = 'block';
+                
+                // 写入磁盘
+                const diskPage1 = document.getElementById('diskPage1');
+                const diskPage2 = document.getElementById('diskPage2');
+                
+                diskPage1.classList.add('writing');
+                await this.sleep(1000);
+                
+                diskPage1.classList.remove('writing');
+                diskPage1.classList.add('written');
+                document.getElementById('diskData1').innerHTML = `
+                    id=1, name='张三', age=25<br>
+                    id=2, name='李四', age=28 (新增)
+                `;
+                
+                diskPage2.classList.add('writing');
+                await this.sleep(1000);
+                
+                diskPage2.classList.remove('writing');
+                diskPage2.classList.add('written');
+                document.getElementById('diskData2').innerHTML = `
+                    id=3, name='王五', age=30<br>
+                    id=4, name='赵六', age=32 (修改)
+                `;
+                
+                this.log('脏页已成功写入磁盘数据文件', 'success');
+                
+                // 隐藏箭头
+                setTimeout(() => {
+                    arrow2.style.display = 'none';
+                }, 500);
+            }
+
+            completeWrite() {
+                // 清理DWB
+                setTimeout(() => {
+                    document.getElementById('dwbPage1').innerHTML = `
+                        <div>Slot 1</div>
+                        <div style="font-size: 0.7em; color: #666;">空闲</div>
+                    `;
+                    document.getElementById('dwbPage2').innerHTML = `
+                        <div>Slot 2</div>
+                        <div style="font-size: 0.7em; color: #666;">空闲</div>
+                    `;
+                }, 2000);
+                
+                this.log('双写缓冲写入流程完成，DWB空间已释放', 'success');
+            }
+
+            async startCrashSimulation() {
+                this.selectScenario('crash');
+                this.log('开始崩溃场景模拟', 'info');
+            }
+
+            async simulateCrash(crashPoint) {
+                this.crashPoint = crashPoint;
+                
+                if (crashPoint === 'dwb') {
+                    this.log('🚨 模拟在DWB写入过程中系统崩溃', 'error');
+                    
+                    // 开始写入DWB
+                    await this.activateStep(2, '开始写入DWB...');
+                    const dwbPage1 = document.getElementById('dwbPage1');
+                    dwbPage1.classList.add('writing');
+                    dwbPage1.innerHTML = `
+                        <div>Slot 1</div>
+                        <div style="font-size: 0.7em; color: #ff6b6b;">写入中...</div>
+                    `;
+                    
+                    await this.sleep(500);
+                    
+                    // 模拟崩溃
+                    this.log('💥 系统崩溃！DWB写入未完成', 'error');
+                    dwbPage1.classList.remove('writing');
+                    dwbPage1.innerHTML = `
+                        <div>Slot 1</div>
+                        <div style="font-size: 0.7em; color: #f44336;">损坏</div>
+                    `;
+                    
+                } else if (crashPoint === 'disk') {
+                    this.log('🚨 模拟在磁盘写入过程中系统崩溃', 'error');
+                    
+                    // 先完成DWB写入
+                    await this.writeToDWB();
+                    await this.activateStep(4, '开始写入磁盘...');
+                    
+                    const diskPage1 = document.getElementById('diskPage1');
+                    diskPage1.classList.add('writing');
+                    
+                    await this.sleep(500);
+                    
+                    // 模拟崩溃
+                    this.log('💥 系统崩溃！磁盘写入未完成，页面可能损坏', 'error');
+                    diskPage1.classList.remove('writing');
+                    diskPage1.style.background = '#ffebee';
+                    diskPage1.style.borderColor = '#f44336';
+                    document.getElementById('diskData1').innerHTML = `
+                        id=1, name='张三', age=25<br>
+                        <span style="color: #f44336;">页面损坏！</span>
+                    `;
+                }
+            }
+
+            async recoverFromCrash() {
+                this.crashRecoveries++;
+                this.log('🔧 开始系统恢复流程', 'info');
+                
+                if (this.crashPoint === 'dwb') {
+                    this.log('检测到DWB写入未完成，数据文件完整，无需恢复', 'success');
+                    
+                    // 重置DWB
+                    document.getElementById('dwbPage1').innerHTML = `
+                        <div>Slot 1</div>
+                        <div style="font-size: 0.7em; color: #666;">空闲</div>
+                    `;
+                    
+                } else if (this.crashPoint === 'disk') {
+                    this.log('检测到磁盘页面损坏，从DWB恢复...', 'info');
+                    
+                    await this.sleep(1000);
+                    
+                    // 从DWB恢复
+                    const diskPage1 = document.getElementById('diskPage1');
+                    diskPage1.style.background = '';
+                    diskPage1.style.borderColor = '';
+                    diskPage1.classList.add('written');
+                    
+                    document.getElementById('diskData1').innerHTML = `
+                        id=1, name='张三', age=25<br>
+                        id=2, name='李四', age=28 (从DWB恢复)
+                    `;
+                    
+                    this.log('✅ 页面已从DWB成功恢复', 'success');
+                    this.log('重新应用Redo Log完成数据一致性', 'success');
+                }
+                
+                this.crashPoint = null;
+                this.updateStats();
+            }
+
+            updateStats() {
+                document.getElementById('dwbWrites').textContent = this.dwbWrites;
+                document.getElementById('diskWrites').textContent = this.diskWrites;
+                document.getElementById('pagesProtected').textContent = this.pagesProtected;
+                document.getElementById('crashRecoveries').textContent = this.crashRecoveries;
+            }
+
+            log(message, type = '') {
+                const logContainer = document.getElementById('operationLog');
+                const logEntry = document.createElement('div');
+                logEntry.className = `log-entry ${type}`;
+                logEntry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+                logContainer.appendChild(logEntry);
+                logContainer.scrollTop = logContainer.scrollHeight;
+            }
+
+            reset() {
+                this.dwbWrites = 0;
+                this.diskWrites = 0;
+                this.pagesProtected = 0;
+                this.crashRecoveries = 0;
+                this.crashPoint = null;
+
+                // 重置UI
+                document.querySelectorAll('.page-container').forEach(page => {
+                    page.classList.remove('writing', 'written');
+                    page.style.background = '';
+                    page.style.borderColor = '';
+                });
+
+                // 重置DWB
+                for (let i = 1; i <= 4; i++) {
+                    document.getElementById(`dwbPage${i}`).innerHTML = `
+                        <div>Slot ${i}</div>
+                        <div style="font-size: 0.7em; color: #666;">空闲</div>
+                    `;
+                    document.getElementById(`dwbPage${i}`).classList.remove('writing');
+                }
+
+                // 重置磁盘数据
+                document.getElementById('diskData1').innerHTML = `
+                    id=1, name='张三', age=25<br>
+                    (原始数据)
+                `;
+                document.getElementById('diskData2').innerHTML = `
+                    id=3, name='王五', age=30<br>
+                    (原始数据)
+                `;
+
+                // 重置步骤
+                for (let i = 1; i <= 6; i++) {
+                    const step = document.getElementById(`step${i}`);
+                    step.classList.remove('active', 'completed');
+                }
+
+                // 隐藏箭头
+                document.getElementById('arrow1').style.display = 'none';
+                document.getElementById('arrow2').style.display = 'none';
+
+                document.getElementById('operationLog').innerHTML = 
+                    '<div class="log-entry info">双写缓冲演示已重置...</div>';
+
+                this.updateStats();
+            }
+
+            sleep(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+        }
+
+        // 初始化演示
+        const demo = new DoubleWriteBufferDemo();
+
+        function startNormalWrite() {
+            demo.startNormalWrite();
+        }
+
+        function startCrashSimulation() {
+            demo.startCrashSimulation();
+        }
+
+        function simulateCrash(crashPoint) {
+            demo.simulateCrash(crashPoint);
+        }
+
+        function recoverFromCrash() {
+            demo.recoverFromCrash();
+        }
+
+        function selectScenario(scenario) {
+            demo.selectScenario(scenario);
+        }
+
+        function resetDemo() {
+            demo.reset();
+        }
+    </script>
+</body>
+</html>
