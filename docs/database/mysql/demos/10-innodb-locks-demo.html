@@ -1,0 +1,1921 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>InnoDB锁机制工作流演示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .workflow-container {
+            padding: 30px;
+        }
+
+        .workflow-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .workflow-title {
+            font-size: 2em;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .workflow-subtitle {
+            color: #6c757d;
+            font-size: 1.1em;
+        }
+
+        .progress-bar {
+            background: #e9ecef;
+            height: 8px;
+            border-radius: 4px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            background: linear-gradient(90deg, #28a745, #20c997);
+            height: 100%;
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
+        .step-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin: 30px 0;
+            position: relative;
+        }
+
+        .step-indicator::before {
+            content: '';
+            position: absolute;
+            top: 20px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #e9ecef;
+            z-index: 1;
+        }
+
+        .step {
+            background: white;
+            border: 3px solid #e9ecef;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #6c757d;
+            position: relative;
+            z-index: 2;
+            transition: all 0.3s ease;
+        }
+
+        .step.completed {
+            background: #28a745;
+            border-color: #28a745;
+            color: white;
+        }
+
+        .step.active {
+            background: #007bff;
+            border-color: #007bff;
+            color: white;
+            transform: scale(1.2);
+        }
+
+        .step-content {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            margin: 30px 0;
+            border-left: 5px solid #007bff;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+
+        .step-title {
+            font-size: 1.5em;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .step-description {
+            color: #6c757d;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+
+        .demo-area {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            border: 2px solid #e9ecef;
+        }
+
+        .locks-visualization {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin: 20px 0;
+        }
+
+        .index-container {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            border: 2px solid #28a745;
+        }
+
+        .index-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #28a745;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .index-row {
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 10px 0;
+            position: relative;
+            transition: all 0.3s ease;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .index-row.record-locked {
+            border-color: #dc3545;
+            background: #f8d7da;
+        }
+
+        .index-row.gap-locked {
+            border-color: #ffc107;
+            background: #fff3cd;
+        }
+
+        .index-row.next-key-locked {
+            border-color: #6f42c1;
+            background: #e2e3f3;
+        }
+
+        .index-row.shared-locked {
+            border-color: #17a2b8;
+            background: #d1ecf1;
+        }
+
+        .index-row.exclusive-locked {
+            border-color: #dc3545;
+            background: #f8d7da;
+        }
+
+        .lock-indicator {
+            font-size: 1.2em;
+            font-weight: bold;
+            padding: 5px 10px;
+            border-radius: 15px;
+            color: white;
+        }
+
+        .lock-indicator.record {
+            background: #dc3545;
+        }
+
+        .lock-indicator.gap {
+            background: #ffc107;
+            color: #212529;
+        }
+
+        .lock-indicator.next-key {
+            background: #6f42c1;
+        }
+
+        .lock-indicator.shared {
+            background: #17a2b8;
+        }
+
+        .lock-indicator.exclusive {
+            background: #dc3545;
+        }
+
+        .lock-legend {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            border: 2px solid #007bff;
+        }
+
+        .legend-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #007bff;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            margin: 8px 0;
+            padding: 8px;
+            background: white;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+
+        .legend-color {
+            width: 20px;
+            height: 20px;
+            border-radius: 3px;
+            margin-right: 10px;
+        }
+
+        .legend-color.record {
+            background: #dc3545;
+        }
+
+        .legend-color.gap {
+            background: #ffc107;
+        }
+
+        .legend-color.next-key {
+            background: #6f42c1;
+        }
+
+        .legend-color.shared {
+            background: #17a2b8;
+        }
+
+        .legend-color.exclusive {
+            background: #dc3545;
+        }
+
+        .legend-color.nextkey {
+            background: #6f42c1;
+        }
+
+        .legend-color.deadlock {
+            background: #fd7e14;
+        }
+
+        .legend-color.deadlock-resolved {
+            background: #28a745;
+        }
+
+        .legend-color.waiting {
+            background: #6c757d;
+        }
+
+        .legend-color.intention {
+            background: #20c997;
+        }
+
+        .legend-color.intention-shared {
+            background: #17a2b8;
+        }
+
+        .legend-color.intention-exclusive {
+            background: #e83e8c;
+        }
+
+        .legend-color.table-exclusive {
+            background: #dc3545;
+        }
+
+        .lock-indicator.nextkey {
+            background: #6f42c1;
+        }
+
+        .lock-indicator.deadlock {
+            background: #fd7e14;
+        }
+
+        .lock-indicator.waiting {
+            background: #6c757d;
+        }
+
+        .index-row.nextkey-locked {
+            border-color: #6f42c1;
+            background: #e2d9f3;
+        }
+
+        .index-row.deadlock-locked {
+            border-color: #fd7e14;
+            background: #ffeaa7;
+        }
+
+        .transaction-panel {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 2px solid #ffc107;
+        }
+
+        .transaction-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            color: #ffc107;
+            margin-bottom: 15px;
+            text-align: center;
+        }
+
+        .transaction-item {
+            background: #f8f9fa;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 10px 0;
+            border-left: 4px solid #6c757d;
+            font-family: 'Courier New', monospace;
+        }
+
+        .transaction-item.active {
+            border-left-color: #007bff;
+            background: #d1ecf1;
+        }
+
+        .transaction-item.waiting {
+            border-left-color: #ffc107;
+            background: #fff3cd;
+        }
+
+        .transaction-item.completed {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+
+        .transaction-item.blocked {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+        }
+
+        .control-panel {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 2px solid #28a745;
+            text-align: center;
+        }
+
+        .control-button {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+        }
+
+        .control-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+        }
+
+        .control-button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .reset-button {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
+        }
+
+        .reset-button:hover {
+            box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
+        }
+
+        .scenario-selector {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 2px solid #007bff;
+        }
+
+        .scenario-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 20px;
+            margin: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .scenario-button:hover {
+            background: #0056b3;
+            transform: translateY(-1px);
+        }
+
+        .scenario-button.active {
+            background: #28a745;
+        }
+
+        .highlight-box {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+            color: #856404;
+        }
+
+        .success-box {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+            color: #155724;
+        }
+
+        .error-box {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+            color: #721c24;
+        }
+
+        .sql-display {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 15px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            margin: 15px 0;
+            overflow-x: auto;
+        }
+
+        .sql-keyword {
+            color: #63b3ed;
+            font-weight: bold;
+        }
+
+        .sql-string {
+            color: #68d391;
+        }
+
+        .sql-comment {
+            color: #a0aec0;
+            font-style: italic;
+        }
+
+        .gap-visualization {
+            display: flex;
+            align-items: center;
+            margin: 10px 0;
+            padding: 10px;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+
+        .gap-item {
+            padding: 8px 15px;
+            margin: 0 5px;
+            border-radius: 5px;
+            font-weight: bold;
+            text-align: center;
+            min-width: 60px;
+        }
+
+        .gap-item.record {
+            background: #dc3545;
+            color: white;
+        }
+
+        .gap-item.gap {
+            background: #ffc107;
+            color: #212529;
+            border: 2px dashed #f39c12;
+        }
+
+        .gap-arrow {
+            font-size: 20px;
+            color: #6c757d;
+            margin: 0 10px;
+        }
+
+        @media (max-width: 1200px) {
+            .locks-visualization {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .control-button {
+                display: block;
+                margin: 10px auto;
+                width: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>InnoDB锁机制工作流演示</h1>
+            <p>深入理解记录锁、间隙锁和Next-Key锁的工作原理</p>
+        </div>
+
+        <div class="workflow-container">
+            <!-- 场景选择器 -->
+            <div class="scenario-selector">
+                <h3>选择演示场景：</h3>
+                <button class="scenario-button active" onclick="selectScenario('record')">记录锁演示</button>
+                <button class="scenario-button" onclick="selectScenario('gap')">间隙锁演示</button>
+                <button class="scenario-button" onclick="selectScenario('nextkey')">临键锁演示</button>
+                <button class="scenario-button" onclick="selectScenario('deadlock')">死锁检测演示</button>
+                <button class="scenario-button" onclick="selectScenario('lockingprocess')">详细加锁流程</button>
+            </div>
+
+            <!-- 工作流标题 -->
+            <div class="workflow-header">
+                <h2 class="workflow-title" id="workflow-title">记录锁演示</h2>
+                <p class="workflow-subtitle" id="workflow-subtitle">了解记录锁如何锁定具体的索引记录</p>
+            </div>
+
+            <!-- 进度条 -->
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+
+            <!-- 步骤指示器 -->
+            <div class="step-indicator" id="step-indicator">
+                <div class="step active" id="step-1">1</div>
+                <div class="step" id="step-2">2</div>
+                <div class="step" id="step-3">3</div>
+                <div class="step" id="step-4">4</div>
+                <div class="step" id="step-5">5</div>
+            </div>
+
+            <!-- 控制面板 -->
+            <div class="control-panel">
+                <button class="control-button" id="prev-button" onclick="prevStep()" disabled>上一步</button>
+                <button class="control-button" id="next-button" onclick="nextStep()">下一步</button>
+                <button class="control-button reset-button" onclick="resetDemo()">重置演示</button>
+            </div>
+
+            <!-- 当前步骤内容 -->
+            <div class="step-content" id="step-content">
+                <!-- 步骤内容将通过JavaScript动态生成 -->
+            </div>
+
+            <!-- 锁可视化区域 -->
+            <div class="locks-visualization">
+                <!-- 索引结构 -->
+                <div class="index-container">
+                    <div class="index-title">📊 索引结构</div>
+                    <div id="index-structure">
+                        <!-- 索引行将通过JavaScript动态生成 -->
+                    </div>
+                </div>
+
+                <!-- 锁图例 -->
+                <div class="lock-legend">
+                    <div class="legend-title">🔒 锁类型图例</div>
+                    <div id="lock-legend">
+                        <!-- 图例项将通过JavaScript动态生成 -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- 事务面板 -->
+            <div class="transaction-panel">
+                <div class="transaction-title">⚡ 事务执行状态</div>
+                <div id="transaction-status">
+                    <!-- 事务状态将通过JavaScript动态生成 -->
+                </div>
+            </div>
+
+            <!-- 间隙可视化（仅在间隙锁和Next-Key锁场景显示） -->
+            <div class="gap-visualization" id="gap-visualization" style="display: none;">
+                <!-- 间隙可视化将通过JavaScript动态生成 -->
+            </div>
+
+            <!-- 等待图可视化（仅在死锁场景显示） -->
+            <div class="wait-graph" id="wait-graph" style="display: none; background: white; border-radius: 10px; padding: 20px; margin-top: 20px; border: 2px solid #007bff;">
+                <!-- 等待图将通过JavaScript动态生成 -->
+            </div>
+
+            <!-- 表级锁可视化（仅在意向锁场景显示） -->
+            <div class="table-locks" id="table-locks" style="display: none; background: white; border-radius: 10px; padding: 20px; margin-top: 20px; border: 2px solid #007bff;">
+                <!-- 表级锁将通过JavaScript动态生成 -->
+            </div>
+
+            <!-- 加锁步骤可视化（仅在详细加锁流程场景显示） -->
+            <div class="locking-steps" id="locking-steps" style="display: none; background: white; border-radius: 10px; padding: 20px; margin-top: 20px; border: 2px solid #28a745;">
+                <!-- 加锁步骤将通过JavaScript动态生成 -->
+            </div>
+
+            <!-- 锁表可视化（仅在详细加锁流程场景显示） -->
+            <div class="lock-table" id="lock-table" style="display: none; background: white; border-radius: 10px; padding: 20px; margin-top: 20px; border: 2px solid #dc3545;">
+                <!-- 锁表将通过JavaScript动态生成 -->
+            </div>
+
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let currentStep = 1;
+        let currentScenario = 'record';
+
+        // 场景配置
+        const scenarios = {
+            record: {
+                title: '记录锁演示',
+                subtitle: '了解记录锁如何锁定具体的索引记录',
+                steps: [
+                    {
+                        title: '📋 准备测试数据',
+                        description: '创建用户表并插入测试数据，建立主键索引。',
+                        explanation: '记录锁锁定的是索引记录，而不是数据行本身。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(50), age INT)', status: 'completed' },
+                            { id: 'T2', sql: 'INSERT INTO users VALUES (1,"张三",25), (5,"李四",30), (10,"王五",35), (15,"赵六",40)', status: 'completed' }
+                        ],
+                        legend: [
+                            { type: 'record', name: '记录锁', description: '锁定具体的索引记录' }
+                        ]
+                    },
+                    {
+                        title: '🔒 事务A获取排他锁',
+                        description: '事务A执行UPDATE语句，对id=5的记录加排他锁。',
+                        explanation: '排他锁（X锁）阻止其他事务对同一记录进行读写操作。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: true, lockType: 'exclusive' },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'BEGIN', status: 'active' },
+                            { id: 'T1', sql: 'UPDATE users SET age = 31 WHERE id = 5', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'exclusive', name: '排他锁(X)', description: '阻止其他事务读写' }
+                        ]
+                    },
+                    {
+                        title: '🚫 事务B尝试访问',
+                        description: '事务B尝试修改同一记录，被阻塞等待。',
+                        explanation: '由于记录已被排他锁锁定，事务B必须等待事务A释放锁。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: true, lockType: 'exclusive' },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'UPDATE users SET age = 31 WHERE id = 5', status: 'active' },
+                            { id: 'T2', sql: 'BEGIN', status: 'active' },
+                            { id: 'T2', sql: 'UPDATE users SET age = 32 WHERE id = 5', status: 'blocked' }
+                        ],
+                        legend: [
+                            { type: 'exclusive', name: '排他锁(X)', description: '阻止其他事务读写' }
+                        ]
+                    },
+                    {
+                        title: '✅ 事务A提交',
+                        description: '事务A提交，释放排他锁。',
+                        explanation: '锁在事务提交或回滚时自动释放。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 31, locked: false, lockType: null },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'COMMIT', status: 'completed' },
+                            { id: 'T2', sql: 'UPDATE users SET age = 32 WHERE id = 5', status: 'waiting' }
+                        ],
+                        legend: [
+                            { type: 'record', name: '记录锁', description: '锁定具体的索引记录' }
+                        ]
+                    },
+                    {
+                        title: '🎯 事务B获得锁',
+                        description: '事务B获得锁并成功执行更新操作。',
+                        explanation: '记录锁确保了数据的一致性，避免了并发修改冲突。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 32, locked: true, lockType: 'exclusive' },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T2', sql: 'UPDATE users SET age = 32 WHERE id = 5', status: 'active' },
+                            { id: 'T2', sql: 'COMMIT', status: 'completed' }
+                        ],
+                        legend: [
+                            { type: 'exclusive', name: '排他锁(X)', description: '阻止其他事务读写' }
+                        ]
+                    }
+                ]
+            },
+            gap: {
+                title: '间隙锁演示',
+                subtitle: '了解间隙锁如何防止幻读问题',
+                steps: [
+                    {
+                        title: '📋 准备测试数据',
+                        description: '创建用户表并插入测试数据，注意ID之间的间隙。',
+                        explanation: '间隙锁锁定的是索引记录之间的间隙，防止新记录插入。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(50), age INT)', status: 'completed' },
+                            { id: 'T2', sql: 'INSERT INTO users VALUES (1,"张三",25), (5,"李四",30), (10,"王五",35), (15,"赵六",40)', status: 'completed' }
+                        ],
+                        legend: [
+                            { type: 'gap', name: '间隙锁', description: '锁定索引记录之间的间隙' }
+                        ],
+                        gaps: [
+                            { start: '(-∞', end: '1)', locked: false },
+                            { start: '(1', end: '5)', locked: false },
+                            { start: '(5', end: '10)', locked: false },
+                            { start: '(10', end: '15)', locked: false },
+                            { start: '(15', end: '+∞)', locked: false }
+                        ]
+                    },
+                    {
+                        title: '🔍 事务A执行范围查询',
+                        description: '事务A执行SELECT ... FOR UPDATE，锁定范围内的间隙。',
+                        explanation: '范围查询会对查询范围内的间隙加锁，防止其他事务插入新记录。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'BEGIN', status: 'active' },
+                            { id: 'T1', sql: 'SELECT * FROM users WHERE id > 3 AND id < 12 FOR UPDATE', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'gap', name: '间隙锁', description: '锁定索引记录之间的间隙' }
+                        ],
+                        gaps: [
+                            { start: '(-∞', end: '1)', locked: false },
+                            { start: '(1', end: '5)', locked: true },
+                            { start: '(5', end: '10)', locked: true },
+                            { start: '(10', end: '15)', locked: true },
+                            { start: '(15', end: '+∞)', locked: false }
+                        ]
+                    },
+                    {
+                        title: '🚫 事务B尝试插入',
+                        description: '事务B尝试在锁定的间隙中插入新记录，被阻塞。',
+                        explanation: '间隙锁阻止了在(1,5)、(5,10)、(10,15)间隙中插入新记录。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'SELECT * FROM users WHERE id > 3 AND id < 12 FOR UPDATE', status: 'active' },
+                            { id: 'T2', sql: 'BEGIN', status: 'active' },
+                            { id: 'T2', sql: 'INSERT INTO users VALUES (7, "新用户", 28)', status: 'blocked' }
+                        ],
+                        legend: [
+                            { type: 'gap', name: '间隙锁', description: '锁定索引记录之间的间隙' }
+                        ],
+                        gaps: [
+                            { start: '(-∞', end: '1)', locked: false },
+                            { start: '(1', end: '5)', locked: true },
+                            { start: '(5', end: '10)', locked: true },
+                            { start: '(10', end: '15)', locked: true },
+                            { start: '(15', end: '+∞)', locked: false }
+                        ]
+                    },
+                    {
+                        title: '✅ 允许的插入操作',
+                        description: '事务C可以在未锁定的间隙中插入记录。',
+                        explanation: '间隙锁只锁定特定范围，其他间隙仍然可以插入。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null },
+                            { id: 20, name: '新用户', age: 45, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'SELECT * FROM users WHERE id > 3 AND id < 12 FOR UPDATE', status: 'active' },
+                            { id: 'T2', sql: 'INSERT INTO users VALUES (7, "新用户", 28)', status: 'blocked' },
+                            { id: 'T3', sql: 'INSERT INTO users VALUES (20, "新用户", 45)', status: 'completed' }
+                        ],
+                        legend: [
+                            { type: 'gap', name: '间隙锁', description: '锁定索引记录之间的间隙' }
+                        ],
+                        gaps: [
+                            { start: '(-∞', end: '1)', locked: false },
+                            { start: '(1', end: '5)', locked: true },
+                            { start: '(5', end: '10)', locked: true },
+                            { start: '(10', end: '15)', locked: true },
+                            { start: '(15', end: '+∞)', locked: false }
+                        ]
+                    },
+                    {
+                        title: '🔓 事务A提交释放锁',
+                        description: '事务A提交，释放间隙锁，事务B可以继续执行。',
+                        explanation: '间隙锁的释放允许被阻塞的插入操作继续执行。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: false, lockType: null },
+                            { id: 7, name: '新用户', age: 28, locked: false, lockType: null },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null },
+                            { id: 20, name: '新用户', age: 45, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'COMMIT', status: 'completed' },
+                            { id: 'T2', sql: 'INSERT INTO users VALUES (7, "新用户", 28)', status: 'completed' },
+                            { id: 'T2', sql: 'COMMIT', status: 'completed' }
+                        ],
+                        legend: [
+                            { type: 'gap', name: '间隙锁', description: '锁定索引记录之间的间隙' }
+                        ],
+                        gaps: [
+                            { start: '(-∞', end: '1)', locked: false },
+                            { start: '(1', end: '5)', locked: false },
+                            { start: '(5', end: '7)', locked: false },
+                            { start: '(7', end: '10)', locked: false },
+                            { start: '(10', end: '15)', locked: false },
+                            { start: '(15', end: '20)', locked: false },
+                            { start: '(20', end: '+∞)', locked: false }
+                        ]
+                    }
+                ]
+            },
+            nextkey: {
+                title: '临键锁演示',
+                subtitle: '了解临键锁如何结合记录锁和间隙锁防止幻读',
+                steps: [
+                    {
+                        title: '📋 准备测试数据',
+                        description: '创建用户表并插入测试数据，建立普通索引。',
+                        explanation: '临键锁是记录锁和间隙锁的组合，锁定记录本身及其前面的间隙。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(50), age INT, INDEX idx_age(age))', status: 'completed' },
+                            { id: 'T2', sql: 'INSERT INTO users VALUES (1,"张三",25), (5,"李四",30), (10,"王五",35), (15,"赵六",40)', status: 'completed' }
+                        ],
+                        legend: [
+                            { type: 'nextkey', name: '临键锁', description: '记录锁+间隙锁的组合' }
+                        ],
+                        gaps: [
+                            { start: '(-∞', end: '25]', locked: false },
+                            { start: '(25', end: '30]', locked: false },
+                            { start: '(30', end: '35]', locked: false },
+                            { start: '(35', end: '40]', locked: false },
+                            { start: '(40', end: '+∞)', locked: false }
+                        ]
+                    },
+                    {
+                        title: '🔒 事务A执行范围查询',
+                        description: '事务A执行SELECT ... FOR UPDATE，对age >= 30的记录加临键锁。',
+                        explanation: '临键锁锁定了age=30,35,40的记录以及(25,30]、(30,35]、(35,40]、(40,+∞)的间隙。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: true, lockType: 'nextkey' },
+                            { id: 10, name: '王五', age: 35, locked: true, lockType: 'nextkey' },
+                            { id: 15, name: '赵六', age: 40, locked: true, lockType: 'nextkey' }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'BEGIN', status: 'active' },
+                            { id: 'T1', sql: 'SELECT * FROM users WHERE age >= 30 FOR UPDATE', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'nextkey', name: '临键锁', description: '记录锁+间隙锁的组合' }
+                        ],
+                        gaps: [
+                            { start: '(-∞', end: '25]', locked: false },
+                            { start: '(25', end: '30]', locked: true },
+                            { start: '(30', end: '35]', locked: true },
+                            { start: '(35', end: '40]', locked: true },
+                            { start: '(40', end: '+∞)', locked: true }
+                        ]
+                    },
+                    {
+                        title: '🚫 事务B尝试插入',
+                        description: '事务B尝试插入age=32的记录，被临键锁阻塞。',
+                        explanation: '临键锁阻止了在锁定间隙内插入新记录，防止幻读。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: true, lockType: 'nextkey' },
+                            { id: 10, name: '王五', age: 35, locked: true, lockType: 'nextkey' },
+                            { id: 15, name: '赵六', age: 40, locked: true, lockType: 'nextkey' }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'SELECT * FROM users WHERE age >= 30 FOR UPDATE', status: 'active' },
+                            { id: 'T2', sql: 'BEGIN', status: 'active' },
+                            { id: 'T2', sql: 'INSERT INTO users VALUES (8, "新用户", 32)', status: 'blocked' }
+                        ],
+                        legend: [
+                            { type: 'nextkey', name: '临键锁', description: '记录锁+间隙锁的组合' }
+                        ],
+                        gaps: [
+                            { start: '(-∞', end: '25]', locked: false },
+                            { start: '(25', end: '30]', locked: true },
+                            { start: '(30', end: '35]', locked: true },
+                            { start: '(35', end: '40]', locked: true },
+                            { start: '(40', end: '+∞)', locked: true }
+                        ]
+                    },
+                    {
+                        title: '✅ 允许的操作',
+                        description: '事务C可以插入age=28的记录，因为不在锁定范围内。',
+                        explanation: '临键锁只锁定特定范围，未锁定的间隙仍然可以插入。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 3, name: '新用户', age: 28, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: true, lockType: 'nextkey' },
+                            { id: 10, name: '王五', age: 35, locked: true, lockType: 'nextkey' },
+                            { id: 15, name: '赵六', age: 40, locked: true, lockType: 'nextkey' }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'SELECT * FROM users WHERE age >= 30 FOR UPDATE', status: 'active' },
+                            { id: 'T2', sql: 'INSERT INTO users VALUES (8, "新用户", 32)', status: 'blocked' },
+                            { id: 'T3', sql: 'INSERT INTO users VALUES (3, "新用户", 28)', status: 'completed' }
+                        ],
+                        legend: [
+                            { type: 'nextkey', name: '临键锁', description: '记录锁+间隙锁的组合' }
+                        ],
+                        gaps: [
+                            { start: '(-∞', end: '25]', locked: false },
+                            { start: '(25', end: '30]', locked: true },
+                            { start: '(30', end: '35]', locked: true },
+                            { start: '(35', end: '40]', locked: true },
+                            { start: '(40', end: '+∞)', locked: true }
+                        ]
+                    },
+                    {
+                        title: '🔓 事务A提交释放锁',
+                        description: '事务A提交，释放临键锁，事务B可以继续执行。',
+                        explanation: '临键锁的释放允许被阻塞的插入和更新操作继续执行。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 3, name: '新用户', age: 28, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: false, lockType: null },
+                            { id: 8, name: '新用户', age: 32, locked: false, lockType: null },
+                            { id: 10, name: '王五', age: 35, locked: false, lockType: null },
+                            { id: 15, name: '赵六', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'COMMIT', status: 'completed' },
+                            { id: 'T2', sql: 'INSERT INTO users VALUES (8, "新用户", 32)', status: 'completed' },
+                            { id: 'T2', sql: 'COMMIT', status: 'completed' }
+                        ],
+                        legend: [
+                            { type: 'nextkey', name: '临键锁', description: '记录锁+间隙锁的组合' }
+                        ],
+                        gaps: [
+                            { start: '(-∞', end: '25]', locked: false },
+                            { start: '(25', end: '28]', locked: false },
+                            { start: '(28', end: '30]', locked: false },
+                            { start: '(30', end: '32]', locked: false },
+                            { start: '(32', end: '35]', locked: false },
+                            { start: '(35', end: '40]', locked: false },
+                            { start: '(40', end: '+∞)', locked: false }
+                        ]
+                    }
+                ]
+            },
+            deadlock: {
+                title: '死锁检测演示',
+                subtitle: '了解InnoDB如何检测和解决死锁问题',
+                steps: [
+                    {
+                        title: '📋 准备测试数据',
+                        description: '创建用户表并插入测试数据，准备死锁演示场景。',
+                        explanation: '死锁发生在两个或多个事务相互等待对方释放锁的情况。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '李四', age: 30, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'CREATE TABLE users (id INT PRIMARY KEY, name VARCHAR(50), age INT)', status: 'completed' },
+                            { id: 'T2', sql: 'INSERT INTO users VALUES (1,"张三",25), (5,"李四",30)', status: 'completed' }
+                        ],
+                        legend: [
+                            { type: 'deadlock', name: '死锁检测', description: 'InnoDB自动检测并解决死锁' }
+                        ],
+                        waitGraph: []
+                    },
+                    {
+                        title: '🔒 事务A锁定记录1',
+                        description: '事务A开始，锁定id=1的记录。',
+                        explanation: '事务A获得id=1记录的排他锁。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: true, lockType: 'exclusive' },
+                            { id: 5, name: '李四', age: 30, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'BEGIN', status: 'active' },
+                            { id: 'T1', sql: 'UPDATE users SET age = 26 WHERE id = 1', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'exclusive', name: '排他锁(X)', description: '阻止其他事务读写' }
+                        ],
+                        waitGraph: [
+                            { from: 'T1', to: null, resource: 'id=1', status: 'holding' }
+                        ]
+                    },
+                    {
+                        title: '🔒 事务B锁定记录5',
+                        description: '事务B开始，锁定id=5的记录。',
+                        explanation: '事务B获得id=5记录的排他锁。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: true, lockType: 'exclusive' },
+                            { id: 5, name: '李四', age: 30, locked: true, lockType: 'exclusive' }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'UPDATE users SET age = 26 WHERE id = 1', status: 'active' },
+                            { id: 'T2', sql: 'BEGIN', status: 'active' },
+                            { id: 'T2', sql: 'UPDATE users SET age = 31 WHERE id = 5', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'exclusive', name: '排他锁(X)', description: '阻止其他事务读写' }
+                        ],
+                        waitGraph: [
+                            { from: 'T1', to: null, resource: 'id=1', status: 'holding' },
+                            { from: 'T2', to: null, resource: 'id=5', status: 'holding' }
+                        ]
+                    },
+                    {
+                        title: '⏳ 事务A等待记录5',
+                        description: '事务A尝试锁定id=5的记录，被事务B阻塞。',
+                        explanation: '事务A等待事务B释放id=5的锁。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: true, lockType: 'exclusive' },
+                            { id: 5, name: '李四', age: 30, locked: true, lockType: 'exclusive' }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'UPDATE users SET age = 26 WHERE id = 1', status: 'active' },
+                            { id: 'T1', sql: 'UPDATE users SET age = 32 WHERE id = 5', status: 'blocked' },
+                            { id: 'T2', sql: 'UPDATE users SET age = 31 WHERE id = 5', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'exclusive', name: '排他锁(X)', description: '阻止其他事务读写' },
+                            { type: 'waiting', name: '等待锁', description: '事务等待获取锁' }
+                        ],
+                        waitGraph: [
+                            { from: 'T1', to: null, resource: 'id=1', status: 'holding' },
+                            { from: 'T1', to: 'T2', resource: 'id=5', status: 'waiting' },
+                            { from: 'T2', to: null, resource: 'id=5', status: 'holding' }
+                        ]
+                    },
+                    {
+                        title: '💀 形成死锁',
+                        description: '事务B尝试锁定id=1的记录，形成死锁环路。',
+                        explanation: '事务A等待事务B，事务B等待事务A，形成死锁。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 25, locked: true, lockType: 'exclusive' },
+                            { id: 5, name: '李四', age: 30, locked: true, lockType: 'exclusive' }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'UPDATE users SET age = 32 WHERE id = 5', status: 'blocked' },
+                            { id: 'T2', sql: 'UPDATE users SET age = 31 WHERE id = 5', status: 'active' },
+                            { id: 'T2', sql: 'UPDATE users SET age = 27 WHERE id = 1', status: 'blocked' }
+                        ],
+                        legend: [
+                            { type: 'deadlock', name: '死锁', description: '事务相互等待形成环路' },
+                            { type: 'exclusive', name: '排他锁(X)', description: '阻止其他事务读写' }
+                        ],
+                        waitGraph: [
+                            { from: 'T1', to: null, resource: 'id=1', status: 'holding' },
+                            { from: 'T1', to: 'T2', resource: 'id=5', status: 'waiting' },
+                            { from: 'T2', to: null, resource: 'id=5', status: 'holding' },
+                            { from: 'T2', to: 'T1', resource: 'id=1', status: 'waiting' }
+                        ]
+                    },
+                    {
+                        title: '🔧 死锁检测和解决',
+                        description: 'InnoDB检测到死锁，回滚事务B，事务A继续执行。',
+                        explanation: 'InnoDB选择回滚代价较小的事务来解决死锁。',
+                        indexData: [
+                            { id: 1, name: '张三', age: 26, locked: true, lockType: 'exclusive' },
+                            { id: 5, name: '李四', age: 32, locked: true, lockType: 'exclusive' }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'UPDATE users SET age = 32 WHERE id = 5', status: 'active' },
+                            { id: 'T1', sql: 'COMMIT', status: 'completed' },
+                            { id: 'T2', sql: 'ROLLBACK (Deadlock detected)', status: 'rollback' }
+                        ],
+                        legend: [
+                            { type: 'deadlock-resolved', name: '死锁已解决', description: 'InnoDB自动回滚一个事务' },
+                            { type: 'exclusive', name: '排他锁(X)', description: '阻止其他事务读写' }
+                        ],
+                        waitGraph: [
+                            { from: 'T1', to: null, resource: 'id=1,5', status: 'holding' }
+                        ]
+                    }
+                ]
+            },
+            lockingprocess: {
+                title: '详细加锁流程演示',
+                subtitle: '深入了解InnoDB如何对具体数据进行加锁',
+                steps: [
+                    {
+                        title: '📋 SQL解析与执行计划',
+                        description: 'UPDATE users SET name = "张三" WHERE id = 10 - 解析SQL并生成执行计划',
+                        explanation: '执行引擎首先解析SQL语句，确定使用主键索引，生成最优执行计划。',
+                        indexData: [
+                            { id: 1, name: '用户A', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '用户B', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '用户C', age: 35, locked: false, lockType: null, highlight: true },
+                            { id: 15, name: '用户D', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'BEGIN', status: 'active' },
+                            { id: 'T1', sql: '解析: UPDATE users SET name = "张三" WHERE id = 10', status: 'active' },
+                            { id: 'T1', sql: '执行计划: 使用主键索引定位记录', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'highlight', name: '目标记录', description: '即将被锁定的记录' }
+                        ],
+                        lockingSteps: [
+                            { step: 1, description: 'SQL解析器分析语句结构', status: 'completed' },
+                            { step: 2, description: '优化器选择主键索引', status: 'completed' },
+                            { step: 3, description: '生成执行计划', status: 'completed' },
+                            { step: 4, description: '准备开始执行', status: 'active' }
+                        ]
+                    },
+                    {
+                        title: '🔍 索引扫描定位记录',
+                        description: '通过主键索引定位到id=10的记录位置',
+                        explanation: '执行引擎使用B+树索引快速定位到目标记录的物理位置。',
+                        indexData: [
+                            { id: 1, name: '用户A', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '用户B', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '用户C', age: 35, locked: false, lockType: null, highlight: true, scanning: true },
+                            { id: 15, name: '用户D', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: '索引扫描: 定位id=10记录', status: 'active' },
+                            { id: 'T1', sql: '记录位置: space_id=1, page_no=3, heap_no=2', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'scanning', name: '正在扫描', description: '索引扫描定位中' }
+                        ],
+                        lockingSteps: [
+                            { step: 1, description: '遍历B+树根节点', status: 'completed' },
+                            { step: 2, description: '定位到叶子节点页面', status: 'completed' },
+                            { step: 3, description: '在页面中找到目标记录', status: 'active' },
+                            { step: 4, description: '获取记录的物理位置信息', status: 'waiting' }
+                        ]
+                    },
+                    {
+                        title: '🔒 检查锁冲突',
+                        description: '检查目标记录是否已被其他事务锁定',
+                        explanation: 'InnoDB检查锁表，确认该记录当前没有被其他事务持有冲突的锁。',
+                        indexData: [
+                            { id: 1, name: '用户A', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '用户B', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '用户C', age: 35, locked: false, lockType: null, highlight: true, checking: true },
+                            { id: 15, name: '用户D', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: '锁冲突检测: 检查记录id=10的锁状态', status: 'active' },
+                            { id: 'T1', sql: '检测结果: 无冲突锁，可以加锁', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'checking', name: '冲突检测', description: '检查是否存在锁冲突' }
+                        ],
+                        lockingSteps: [
+                            { step: 1, description: '查询锁表中的记录', status: 'completed' },
+                            { step: 2, description: '检查锁兼容性', status: 'active' },
+                            { step: 3, description: '确认无冲突', status: 'waiting' },
+                            { step: 4, description: '准备加锁', status: 'waiting' }
+                        ],
+                        lockTable: [
+                            { space_id: 1, page_no: 3, heap_no: 2, lock_type: 'NONE', trx_id: null, waiting: false }
+                        ]
+                    },
+                    {
+                        title: '🔐 加排他锁',
+                        description: '在id=10的记录上成功加排他锁',
+                        explanation: '在锁表中创建锁记录，标记该记录被当前事务以排他模式锁定。',
+                        indexData: [
+                            { id: 1, name: '用户A', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '用户B', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '用户C', age: 35, locked: true, lockType: 'exclusive', trx_id: 'T1' },
+                            { id: 15, name: '用户D', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: '加锁成功: 记录id=10已被排他锁锁定', status: 'active' },
+                            { id: 'T1', sql: '锁信息: space_id=1, page_no=3, heap_no=2, lock_type=X', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'exclusive', name: '排他锁(X)', description: '阻止其他事务读写' }
+                        ],
+                        lockingSteps: [
+                            { step: 1, description: '创建锁结构', status: 'completed' },
+                            { step: 2, description: '设置锁类型为排他锁', status: 'completed' },
+                            { step: 3, description: '记录事务ID', status: 'completed' },
+                            { step: 4, description: '插入锁表', status: 'active' }
+                        ],
+                        lockTable: [
+                            { space_id: 1, page_no: 3, heap_no: 2, lock_type: 'X', trx_id: 'T1', waiting: false }
+                        ]
+                    },
+                    {
+                        title: '✏️ 执行数据修改',
+                        description: '在获得锁后，执行实际的数据修改操作',
+                        explanation: '锁定记录后，事务可以安全地修改数据，同时生成undo log用于回滚。',
+                        indexData: [
+                            { id: 1, name: '用户A', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '用户B', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '张三', age: 35, locked: true, lockType: 'exclusive', trx_id: 'T1', modified: true },
+                            { id: 15, name: '用户D', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: '数据修改: name "用户C" -> "张三"', status: 'active' },
+                            { id: 'T1', sql: 'Undo Log: 记录原始值 "用户C"', status: 'active' },
+                            { id: 'T1', sql: 'Redo Log: 记录修改操作', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'modified', name: '已修改', description: '数据已被修改' },
+                            { type: 'exclusive', name: '排他锁(X)', description: '阻止其他事务读写' }
+                        ],
+                        lockingSteps: [
+                            { step: 1, description: '生成undo log记录', status: 'completed' },
+                            { step: 2, description: '修改数据页中的记录', status: 'completed' },
+                            { step: 3, description: '生成redo log', status: 'completed' },
+                            { step: 4, description: '更新事务版本信息', status: 'active' }
+                        ],
+                        lockTable: [
+                            { space_id: 1, page_no: 3, heap_no: 2, lock_type: 'X', trx_id: 'T1', waiting: false }
+                        ]
+                    },
+                    {
+                        title: '⏳ 其他事务等待',
+                        description: '事务T2尝试修改同一记录，被阻塞等待',
+                        explanation: '由于记录已被T1锁定，T2必须等待T1释放锁才能继续执行。',
+                        indexData: [
+                            { id: 1, name: '用户A', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '用户B', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '张三', age: 35, locked: true, lockType: 'exclusive', trx_id: 'T1' },
+                            { id: 15, name: '用户D', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'UPDATE users SET name = "张三" WHERE id = 10', status: 'active' },
+                            { id: 'T2', sql: 'BEGIN', status: 'active' },
+                            { id: 'T2', sql: 'UPDATE users SET age = 36 WHERE id = 10', status: 'blocked' }
+                        ],
+                        legend: [
+                            { type: 'exclusive', name: '排他锁(X)', description: 'T1持有的排他锁' },
+                            { type: 'waiting', name: '等待锁', description: 'T2等待获取锁' }
+                        ],
+                        lockingSteps: [
+                            { step: 1, description: 'T2尝试获取排他锁', status: 'completed' },
+                            { step: 2, description: '检测到锁冲突', status: 'completed' },
+                            { step: 3, description: '加入等待队列', status: 'active' },
+                            { step: 4, description: '设置锁等待超时', status: 'waiting' }
+                        ],
+                        lockTable: [
+                            { space_id: 1, page_no: 3, heap_no: 2, lock_type: 'X', trx_id: 'T1', waiting: false },
+                            { space_id: 1, page_no: 3, heap_no: 2, lock_type: 'X', trx_id: 'T2', waiting: true }
+                        ],
+                        waitGraph: [
+                            { from: 'T1', to: null, resource: 'id=10', status: 'holding' },
+                            { from: 'T2', to: 'T1', resource: 'id=10', status: 'waiting' }
+                        ]
+                    },
+                    {
+                        title: '✅ 事务提交释放锁',
+                        description: '事务T1提交，自动释放所有持有的锁',
+                        explanation: '事务提交时，InnoDB自动释放该事务持有的所有锁，等待的事务可以继续执行。',
+                        indexData: [
+                            { id: 1, name: '用户A', age: 25, locked: false, lockType: null },
+                            { id: 5, name: '用户B', age: 30, locked: false, lockType: null },
+                            { id: 10, name: '张三', age: 36, locked: true, lockType: 'exclusive', trx_id: 'T2' },
+                            { id: 15, name: '用户D', age: 40, locked: false, lockType: null }
+                        ],
+                        transactions: [
+                            { id: 'T1', sql: 'COMMIT', status: 'completed' },
+                            { id: 'T2', sql: 'UPDATE users SET age = 36 WHERE id = 10', status: 'active' },
+                            { id: 'T2', sql: '获得锁，开始执行修改', status: 'active' }
+                        ],
+                        legend: [
+                            { type: 'exclusive', name: '排他锁(X)', description: 'T2现在持有的排他锁' }
+                        ],
+                        lockingSteps: [
+                            { step: 1, description: 'T1提交，释放所有锁', status: 'completed' },
+                            { step: 2, description: '从锁表中移除T1的锁记录', status: 'completed' },
+                            { step: 3, description: 'T2从等待队列中唤醒', status: 'completed' },
+                            { step: 4, description: 'T2获得锁并执行', status: 'active' }
+                        ],
+                        lockTable: [
+                            { space_id: 1, page_no: 3, heap_no: 2, lock_type: 'X', trx_id: 'T2', waiting: false }
+                        ]
+                    }
+                ]
+            }
+        };
+
+        // 初始化演示
+        function initDemo() {
+            updateStepContent();
+            updateProgress();
+            updateButtons();
+            updateStepIndicator();
+            updateVisualization();
+        }
+
+        // 选择场景
+        function selectScenario(scenario) {
+            currentScenario = scenario;
+            currentStep = 1;
+            
+            // 更新场景按钮状态
+            document.querySelectorAll('.scenario-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // 更新标题
+            const config = scenarios[scenario];
+            document.getElementById('workflow-title').textContent = config.title;
+            document.getElementById('workflow-subtitle').textContent = config.subtitle;
+            
+            // 更新显示
+            updateStepContent();
+            updateProgress();
+            updateButtons();
+            updateStepIndicator();
+            updateVisualization();
+        }
+
+        // 下一步
+        function nextStep() {
+            if (currentStep < scenarios[currentScenario].steps.length) {
+                currentStep++;
+                updateStepContent();
+                updateProgress();
+                updateButtons();
+                updateStepIndicator();
+                updateVisualization();
+            }
+        }
+
+        // 上一步
+        function prevStep() {
+            if (currentStep > 1) {
+                currentStep--;
+                updateStepContent();
+                updateProgress();
+                updateButtons();
+                updateStepIndicator();
+                updateVisualization();
+            }
+        }
+
+        // 重置演示
+        function resetDemo() {
+            currentStep = 1;
+            updateStepContent();
+            updateProgress();
+            updateButtons();
+            updateStepIndicator();
+            updateVisualization();
+        }
+
+        // 更新步骤内容
+        function updateStepContent() {
+            const step = scenarios[currentScenario].steps[currentStep - 1];
+            const content = document.getElementById('step-content');
+            
+            content.innerHTML = `
+                <div class="step-title">
+                    ${step.title}
+                </div>
+                <div class="step-description">
+                    ${step.description}
+                </div>
+                <div class="highlight-box">
+                    <strong>说明：</strong>${step.explanation}
+                </div>
+            `;
+        }
+
+        // 更新进度条
+        function updateProgress() {
+            const progress = (currentStep / scenarios[currentScenario].steps.length) * 100;
+            document.getElementById('progress-fill').style.width = progress + '%';
+        }
+
+        // 更新按钮状态
+        function updateButtons() {
+            const nextBtn = document.getElementById('next-button');
+            const prevBtn = document.getElementById('prev-button');
+            
+            nextBtn.disabled = currentStep >= scenarios[currentScenario].steps.length;
+            prevBtn.disabled = currentStep <= 1;
+            
+            if (nextBtn.disabled) {
+                nextBtn.textContent = '演示完成';
+            } else {
+                nextBtn.textContent = '下一步';
+            }
+        }
+
+        // 更新步骤指示器
+        function updateStepIndicator() {
+            const totalSteps = scenarios[currentScenario].steps.length;
+            const indicator = document.getElementById('step-indicator');
+            
+            // 清空现有步骤
+            indicator.innerHTML = '';
+            
+            // 创建步骤圆圈
+            for (let i = 1; i <= totalSteps; i++) {
+                const step = document.createElement('div');
+                step.className = 'step';
+                step.textContent = i;
+                step.id = `step-${i}`;
+                
+                if (i < currentStep) {
+                    step.classList.add('completed');
+                } else if (i === currentStep) {
+                    step.classList.add('active');
+                }
+                
+                indicator.appendChild(step);
+            }
+        }
+
+        // 更新可视化
+        function updateVisualization() {
+            const step = scenarios[currentScenario].steps[currentStep - 1];
+            
+            // 更新索引结构
+            updateIndexStructure(step.indexData);
+            
+            // 更新锁图例
+            updateLockLegend(step.legend);
+            
+            // 更新事务状态
+            updateTransactionStatus(step.transactions);
+            
+            // 更新间隙可视化（如果有）
+            if (step.gaps) {
+                updateGapVisualization(step.gaps);
+                document.getElementById('gap-visualization').style.display = 'block';
+            } else {
+                document.getElementById('gap-visualization').style.display = 'none';
+            }
+            
+            // 更新等待图（如果有）
+            if (step.waitGraph) {
+                updateWaitGraph(step.waitGraph);
+                document.getElementById('wait-graph').style.display = 'block';
+            } else {
+                document.getElementById('wait-graph').style.display = 'none';
+            }
+            
+            // 更新表级锁（如果有）
+            if (step.tableLocks) {
+                updateTableLocks(step.tableLocks);
+                document.getElementById('table-locks').style.display = 'block';
+            } else {
+                document.getElementById('table-locks').style.display = 'none';
+            }
+            
+            // 更新加锁步骤（如果有）
+            if (step.lockingSteps) {
+                updateLockingSteps(step.lockingSteps);
+                document.getElementById('locking-steps').style.display = 'block';
+            } else {
+                document.getElementById('locking-steps').style.display = 'none';
+            }
+            
+            // 更新锁表（如果有）
+            if (step.lockTable) {
+                updateLockTable(step.lockTable);
+                document.getElementById('lock-table').style.display = 'block';
+            } else {
+                document.getElementById('lock-table').style.display = 'none';
+            }
+        }
+
+        // 更新索引结构
+        function updateIndexStructure(indexData) {
+            const container = document.getElementById('index-structure');
+            container.innerHTML = '';
+            
+            indexData.forEach(row => {
+                const rowDiv = document.createElement('div');
+                rowDiv.className = 'index-row';
+                
+                if (row.locked) {
+                    if (row.lockType === 'exclusive') {
+                        rowDiv.classList.add('exclusive-locked');
+                    } else if (row.lockType === 'shared') {
+                        rowDiv.classList.add('shared-locked');
+                    } else if (row.lockType === 'nextkey') {
+                        rowDiv.classList.add('nextkey-locked');
+                    } else if (row.lockType === 'deadlock') {
+                        rowDiv.classList.add('deadlock-locked');
+                    }
+                }
+                
+                const lockText = {
+                    'exclusive': 'X锁',
+                    'shared': 'S锁',
+                    'nextkey': 'NK锁',
+                    'deadlock': '死锁',
+                    'waiting': '等待'
+                };
+                
+                rowDiv.innerHTML = `
+                    <div>
+                        <strong>ID: ${row.id}</strong><br>
+                        <small>name: ${row.name}, age: ${row.age}</small>
+                    </div>
+                    ${row.locked ? `<div class="lock-indicator ${row.lockType}">${lockText[row.lockType] || row.lockType}</div>` : ''}
+                `;
+                
+                container.appendChild(rowDiv);
+            });
+        }
+
+        // 更新锁图例
+        function updateLockLegend(legend) {
+            const container = document.getElementById('lock-legend');
+            container.innerHTML = '';
+            
+            legend.forEach(item => {
+                const legendDiv = document.createElement('div');
+                legendDiv.className = 'legend-item';
+                
+                legendDiv.innerHTML = `
+                    <div class="legend-color ${item.type}"></div>
+                    <div>
+                        <strong>${item.name}</strong><br>
+                        <small>${item.description}</small>
+                    </div>
+                `;
+                
+                container.appendChild(legendDiv);
+            });
+        }
+
+        // 更新事务状态
+        function updateTransactionStatus(transactions) {
+            const container = document.getElementById('transaction-status');
+            container.innerHTML = '';
+            
+            transactions.forEach(tx => {
+                const txDiv = document.createElement('div');
+                txDiv.className = `transaction-item ${tx.status}`;
+                
+                txDiv.innerHTML = `
+                    <strong>${tx.id}:</strong> ${tx.sql}
+                    <div style="margin-top: 5px;">
+                        <small>状态: ${getStatusText(tx.status)}</small>
+                    </div>
+                `;
+                
+                container.appendChild(txDiv);
+            });
+        }
+
+        // 更新间隙可视化
+        function updateGapVisualization(gaps) {
+            const container = document.getElementById('gap-visualization');
+            container.innerHTML = '<h4>间隙锁可视化：</h4>';
+            
+            const gapDiv = document.createElement('div');
+            gapDiv.style.display = 'flex';
+            gapDiv.style.alignItems = 'center';
+            gapDiv.style.flexWrap = 'wrap';
+            gapDiv.style.gap = '10px';
+            
+            gaps.forEach((gap, index) => {
+                const gapItem = document.createElement('div');
+                gapItem.className = 'gap-item gap';
+                gapItem.textContent = `${gap.start}, ${gap.end}`;
+                
+                if (gap.locked) {
+                    gapItem.style.background = '#ffc107';
+                    gapItem.style.border = '2px solid #f39c12';
+                    gapItem.style.fontWeight = 'bold';
+                } else {
+                    gapItem.style.background = '#e9ecef';
+                    gapItem.style.border = '1px solid #dee2e6';
+                }
+                
+                gapDiv.appendChild(gapItem);
+                
+                if (index < gaps.length - 1) {
+                    const arrow = document.createElement('span');
+                    arrow.className = 'gap-arrow';
+                    arrow.textContent = '→';
+                    gapDiv.appendChild(arrow);
+                }
+            });
+            
+            container.appendChild(gapDiv);
+        }
+
+        // 更新等待图
+        function updateWaitGraph(waitGraph) {
+            const container = document.getElementById('wait-graph');
+            container.innerHTML = '<h4>事务等待图</h4>';
+            
+            const graphDiv = document.createElement('div');
+            graphDiv.style.display = 'flex';
+            graphDiv.style.alignItems = 'center';
+            graphDiv.style.justifyContent = 'center';
+            graphDiv.style.gap = '20px';
+            graphDiv.style.padding = '20px';
+            
+            waitGraph.forEach((edge, index) => {
+                const edgeDiv = document.createElement('div');
+                edgeDiv.style.display = 'flex';
+                edgeDiv.style.alignItems = 'center';
+                edgeDiv.style.gap = '10px';
+                
+                edgeDiv.innerHTML = `
+                    <div class="transaction-node" style="padding: 10px; background: #007bff; color: white; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-weight: bold;">
+                        ${edge.from}
+                    </div>
+                    <div style="font-size: 20px; color: #dc3545;">→</div>
+                    <div class="transaction-node" style="padding: 10px; background: #dc3545; color: white; border-radius: 50%; width: 40px; height: 40px; display: flex; align-items: center; justify-content: center; font-weight: bold;">
+                        ${edge.to}
+                    </div>
+                `;
+                
+                if (edge.cycle) {
+                    edgeDiv.style.border = '2px solid #fd7e14';
+                    edgeDiv.style.borderRadius = '10px';
+                    edgeDiv.style.padding = '10px';
+                    edgeDiv.style.background = '#fff3cd';
+                }
+                
+                graphDiv.appendChild(edgeDiv);
+                
+                if (index < waitGraph.length - 1) {
+                    const separator = document.createElement('div');
+                    separator.textContent = '|';
+                    separator.style.fontSize = '20px';
+                    separator.style.color = '#6c757d';
+                    graphDiv.appendChild(separator);
+                }
+            });
+            
+            container.appendChild(graphDiv);
+        }
+        
+        // 更新表级锁
+        function updateTableLocks(tableLocks) {
+            const container = document.getElementById('table-locks');
+            container.innerHTML = '<h4>表级锁状态</h4>';
+            
+            const tableDiv = document.createElement('div');
+            tableDiv.style.display = 'grid';
+            tableDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(200px, 1fr))';
+            tableDiv.style.gap = '15px';
+            tableDiv.style.padding = '20px';
+            
+            tableLocks.forEach(lock => {
+                const lockDiv = document.createElement('div');
+                lockDiv.className = 'table-lock-item';
+                lockDiv.style.padding = '15px';
+                lockDiv.style.border = '2px solid #007bff';
+                lockDiv.style.borderRadius = '8px';
+                lockDiv.style.background = 'white';
+                
+                if (lock.type === 'intention-shared') {
+                    lockDiv.style.borderColor = '#17a2b8';
+                    lockDiv.style.background = '#d1ecf1';
+                } else if (lock.type === 'intention-exclusive') {
+                    lockDiv.style.borderColor = '#e83e8c';
+                    lockDiv.style.background = '#f8d7da';
+                } else if (lock.type === 'table-exclusive') {
+                    lockDiv.style.borderColor = '#dc3545';
+                    lockDiv.style.background = '#f8d7da';
+                }
+                
+                lockDiv.innerHTML = `
+                    <div style="font-weight: bold; margin-bottom: 8px;">${lock.table}</div>
+                    <div class="lock-indicator ${lock.type}" style="display: inline-block; margin-bottom: 8px;">
+                        ${lock.type === 'intention-shared' ? 'IS锁' : 
+                          lock.type === 'intention-exclusive' ? 'IX锁' : 
+                          lock.type === 'table-exclusive' ? '表X锁' : lock.type}
+                    </div>
+                    <div style="font-size: 0.9em; color: #6c757d;">
+                        事务: ${lock.transaction}
+                    </div>
+                `;
+                
+                tableDiv.appendChild(lockDiv);
+            });
+            
+            container.appendChild(tableDiv);
+        }
+
+        // 更新加锁步骤
+        function updateLockingSteps(lockingSteps) {
+            const container = document.getElementById('locking-steps');
+            container.innerHTML = '<h4>加锁流程步骤</h4>';
+            
+            const stepsDiv = document.createElement('div');
+            stepsDiv.style.display = 'grid';
+            stepsDiv.style.gridTemplateColumns = 'repeat(auto-fit, minmax(250px, 1fr))';
+            stepsDiv.style.gap = '15px';
+            stepsDiv.style.padding = '20px';
+            
+            lockingSteps.forEach(step => {
+                const stepDiv = document.createElement('div');
+                stepDiv.className = 'locking-step-item';
+                stepDiv.style.padding = '15px';
+                stepDiv.style.border = '2px solid #e9ecef';
+                stepDiv.style.borderRadius = '8px';
+                stepDiv.style.background = 'white';
+                
+                if (step.status === 'completed') {
+                    stepDiv.style.borderColor = '#28a745';
+                    stepDiv.style.background = '#d4edda';
+                } else if (step.status === 'active') {
+                    stepDiv.style.borderColor = '#007bff';
+                    stepDiv.style.background = '#d1ecf1';
+                } else if (step.status === 'waiting') {
+                    stepDiv.style.borderColor = '#ffc107';
+                    stepDiv.style.background = '#fff3cd';
+                }
+                
+                stepDiv.innerHTML = `
+                    <div style="font-weight: bold; margin-bottom: 8px;">步骤 ${step.step}</div>
+                    <div style="font-size: 0.9em; color: #495057;">${step.description}</div>
+                    <div style="margin-top: 8px; font-size: 0.8em; color: #6c757d;">
+                        状态: ${getStatusText(step.status)}
+                    </div>
+                `;
+                
+                stepsDiv.appendChild(stepDiv);
+            });
+            
+            container.appendChild(stepsDiv);
+        }
+        
+        // 更新锁表
+        function updateLockTable(lockTable) {
+            const container = document.getElementById('lock-table');
+            container.innerHTML = '<h4>锁表状态</h4>';
+            
+            const tableDiv = document.createElement('div');
+            tableDiv.style.overflowX = 'auto';
+            tableDiv.style.padding = '20px';
+            
+            const table = document.createElement('table');
+            table.style.width = '100%';
+            table.style.borderCollapse = 'collapse';
+            table.style.background = 'white';
+            table.style.borderRadius = '8px';
+            table.style.overflow = 'hidden';
+            table.style.boxShadow = '0 2px 4px rgba(0,0,0,0.1)';
+            
+            // 表头
+            const thead = document.createElement('thead');
+            thead.innerHTML = `
+                <tr style="background: #f8f9fa; font-weight: bold;">
+                    <th style="padding: 12px; border: 1px solid #dee2e6;">表空间ID</th>
+                    <th style="padding: 12px; border: 1px solid #dee2e6;">页号</th>
+                    <th style="padding: 12px; border: 1px solid #dee2e6;">记录号</th>
+                    <th style="padding: 12px; border: 1px solid #dee2e6;">锁类型</th>
+                    <th style="padding: 12px; border: 1px solid #dee2e6;">事务ID</th>
+                    <th style="padding: 12px; border: 1px solid #dee2e6;">等待状态</th>
+                </tr>
+            `;
+            table.appendChild(thead);
+            
+            // 表体
+            const tbody = document.createElement('tbody');
+            lockTable.forEach(lock => {
+                const row = document.createElement('tr');
+                
+                if (lock.waiting) {
+                    row.style.background = '#fff3cd';
+                } else if (lock.lock_type === 'X') {
+                    row.style.background = '#f8d7da';
+                } else if (lock.lock_type === 'S') {
+                    row.style.background = '#d1ecf1';
+                }
+                
+                row.innerHTML = `
+                    <td style="padding: 10px; border: 1px solid #dee2e6; text-align: center;">${lock.space_id}</td>
+                    <td style="padding: 10px; border: 1px solid #dee2e6; text-align: center;">${lock.page_no}</td>
+                    <td style="padding: 10px; border: 1px solid #dee2e6; text-align: center;">${lock.heap_no}</td>
+                    <td style="padding: 10px; border: 1px solid #dee2e6; text-align: center;">
+                        <span class="lock-type-badge" style="padding: 4px 8px; border-radius: 4px; font-size: 0.8em; font-weight: bold; 
+                              background: ${lock.lock_type === 'X' ? '#dc3545' : lock.lock_type === 'S' ? '#17a2b8' : '#6c757d'}; 
+                              color: white;">${lock.lock_type}</span>
+                    </td>
+                    <td style="padding: 10px; border: 1px solid #dee2e6; text-align: center;">${lock.trx_id || '-'}</td>
+                    <td style="padding: 10px; border: 1px solid #dee2e6; text-align: center;">
+                        <span style="color: ${lock.waiting ? '#e83e8c' : '#28a745'}; font-weight: bold;">
+                            ${lock.waiting ? '等待中' : '持有中'}
+                        </span>
+                    </td>
+                `;
+                
+                tbody.appendChild(row);
+            });
+            table.appendChild(tbody);
+            
+            tableDiv.appendChild(table);
+            container.appendChild(tableDiv);
+        }
+
+        // 获取状态文本
+        function getStatusText(status) {
+            const statusMap = {
+                'active': '执行中',
+                'completed': '已完成',
+                'blocked': '被阻塞',
+                'waiting': '等待中',
+                'deadlock': '死锁检测',
+                'resolved': '已解决'
+            };
+            return statusMap[status] || status;
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', initDemo);
+    </script>
+</body>
+</html>

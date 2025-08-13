@@ -1,0 +1,1386 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MySQL索引演进过程 - 从磁盘存储到B+树</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #3498db 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .header p {
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+
+        /* 流程条样式 */
+        .progress-bar {
+            background: #f8f9fa;
+            padding: 20px 30px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .progress-steps {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+
+        .progress-step {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            flex: 1;
+            position: relative;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .progress-step:not(:last-child)::after {
+            content: '';
+            position: absolute;
+            top: 20px;
+            right: -50%;
+            width: 100%;
+            height: 3px;
+            background: #e0e0e0;
+            z-index: 1;
+        }
+
+        .progress-step.completed::after {
+            background: #28a745;
+        }
+
+        .progress-step.active::after {
+            background: linear-gradient(to right, #28a745 50%, #e0e0e0 50%);
+        }
+
+        .step-circle {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: #e0e0e0;
+            color: #6c757d;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-bottom: 8px;
+            position: relative;
+            z-index: 2;
+            transition: all 0.3s ease;
+        }
+
+        .progress-step.completed .step-circle {
+            background: #28a745;
+            color: white;
+        }
+
+        .progress-step.active .step-circle {
+            background: #007bff;
+            color: white;
+            transform: scale(1.1);
+            box-shadow: 0 0 20px rgba(0, 123, 255, 0.5);
+        }
+
+        .step-label {
+            font-size: 12px;
+            text-align: center;
+            color: #6c757d;
+            font-weight: 500;
+            max-width: 120px;
+        }
+
+        .progress-step.completed .step-label,
+        .progress-step.active .step-label {
+            color: #2c3e50;
+            font-weight: bold;
+        }
+
+        /* 控制按钮 */
+        .control-buttons {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+            margin: 20px 0;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            padding: 12px 24px;
+            border: none;
+            border-radius: 25px;
+            font-size: 14px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            min-width: 120px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 123, 255, 0.3);
+        }
+
+        .btn-secondary {
+            background: linear-gradient(135deg, #6c757d 0%, #495057 100%);
+            color: white;
+        }
+
+        .btn-secondary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(108, 117, 125, 0.3);
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #1e7e34 100%);
+            color: white;
+        }
+
+        .btn-success:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(40, 167, 69, 0.3);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none !important;
+        }
+
+        /* 主要内容区域 */
+        .main-content {
+            padding: 30px;
+        }
+
+        .step-explanation {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+
+        .step-explanation h3 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .step-explanation p {
+            color: #6c757d;
+            line-height: 1.6;
+            text-align: center;
+        }
+
+        .step-explanation h3 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .step-explanation p {
+            color: #6c757d;
+            line-height: 1.6;
+        }
+
+        .content-layout {
+            display: flex;
+            gap: 30px;
+            min-height: 600px;
+            margin-top: 20px;
+        }
+
+        .left-panel {
+            flex: 1;
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            border: 2px solid #e9ecef;
+        }
+
+        .right-panel {
+            flex: 1;
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            border: 2px solid #e9ecef;
+        }
+
+        .panel-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 20px;
+            text-align: center;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #3498db;
+        }
+
+        /* 数据记录样式 */
+        .data-record {
+            background: #fff;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 12px;
+            margin: 8px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 13px;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .data-record:hover {
+            background: #e3f2fd;
+            border-color: #2196f3;
+            transform: translateX(5px);
+        }
+
+        .data-record.highlight {
+            background: #fff3cd;
+            border-color: #ffc107;
+            animation: pulse 1s ease-in-out;
+        }
+
+        @keyframes pulse {
+            0%, 100% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+        }
+
+        /* 磁盘块样式 */
+        .disk-blocks {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .disk-block {
+            background: #e9ecef;
+            border: 2px solid #6c757d;
+            border-radius: 8px;
+            padding: 10px;
+            text-align: center;
+            font-size: 11px;
+            min-height: 80px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            transition: all 0.3s ease;
+            cursor: pointer;
+        }
+
+        .disk-block.has-data {
+            background: #d4edda;
+            border-color: #28a745;
+            color: #155724;
+        }
+
+        .disk-block.accessing {
+            background: #fff3cd;
+            border-color: #ffc107;
+            animation: accessing 1s ease-in-out infinite;
+        }
+
+        .disk-block.found {
+            background: #d1ecf1;
+            border-color: #17a2b8;
+            color: #0c5460;
+        }
+
+        @keyframes accessing {
+            0%, 100% { transform: scale(1); box-shadow: none; }
+            50% { transform: scale(1.05); box-shadow: 0 0 15px rgba(255, 193, 7, 0.5); }
+        }
+
+        /* 计算展示样式 */
+        .calculation-box {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+
+        .calculation-step {
+            margin: 8px 0;
+            padding: 8px;
+            background: white;
+            border-radius: 5px;
+            border-left: 3px solid #007bff;
+        }
+
+        /* 索引结构样式 */
+        .index-structure {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .index-level {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .index-node {
+            background: #e3f2fd;
+            border: 2px solid #2196f3;
+            border-radius: 8px;
+            padding: 10px 15px;
+            font-size: 12px;
+            text-align: center;
+            min-width: 80px;
+        }
+
+        .index-node.root {
+            background: #ffebee;
+            border-color: #f44336;
+            color: #c62828;
+        }
+
+        .index-connection {
+            width: 2px;
+            height: 20px;
+            background: #6c757d;
+        }
+
+        /* 磁盘物理结构样式 */
+        .disk-physical-structure {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 15px 0;
+        }
+
+        .disk-container {
+            position: relative;
+            width: 300px;
+            height: 300px;
+            margin: 20px auto;
+        }
+
+        .disk-platter {
+            width: 100%;
+            height: 100%;
+            border: 3px solid #6c757d;
+            border-radius: 50%;
+            position: relative;
+            background: radial-gradient(circle, #e9ecef 20%, #dee2e6 80%);
+            overflow: hidden;
+        }
+
+        .disk-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 30px;
+            height: 30px;
+            background: #495057;
+            border-radius: 50%;
+            z-index: 10;
+        }
+
+        .disk-track {
+            position: absolute;
+            border: 1px solid #adb5bd;
+            border-radius: 50%;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
+
+        .disk-sector {
+            position: absolute;
+            width: 2px;
+            background: #6c757d;
+            transform-origin: bottom center;
+            bottom: 50%;
+            left: 50%;
+            margin-left: -1px;
+        }
+
+        .disk-head {
+            position: absolute;
+            top: 50%;
+            left: 10px;
+            transform: translateY(-50%);
+            z-index: 15;
+        }
+
+        .head-arm {
+            width: 120px;
+            height: 4px;
+            background: #dc3545;
+            border-radius: 2px;
+            position: relative;
+            transition: all 0.5s ease;
+        }
+
+        .read-head {
+            position: absolute;
+            right: -8px;
+            top: -4px;
+            width: 12px;
+            height: 12px;
+            background: #dc3545;
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(220, 53, 69, 0.5);
+        }
+
+        .disk-details {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin: 20px 0;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 12px;
+            background: white;
+            border-radius: 5px;
+            border: 1px solid #dee2e6;
+        }
+
+        .detail-row .label {
+            font-weight: bold;
+            color: #495057;
+        }
+
+        .detail-row .value {
+            color: #007bff;
+            font-family: 'Courier New', monospace;
+        }
+
+        .disk-operation-progress {
+            margin: 20px 0;
+        }
+
+        .progress-title {
+            font-weight: bold;
+            color: #2c3e50;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .progress-steps-disk {
+            display: flex;
+            justify-content: space-around;
+            gap: 10px;
+        }
+
+        .progress-step-disk {
+            flex: 1;
+            text-align: center;
+            padding: 10px;
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .progress-step-disk.active {
+            background: #e3f2fd;
+            border-color: #2196f3;
+            color: #1976d2;
+        }
+
+        .progress-step-disk.completed {
+            background: #e8f5e8;
+            border-color: #4caf50;
+            color: #2e7d32;
+        }
+
+        .progress-icon {
+            font-size: 20px;
+            margin-bottom: 5px;
+        }
+
+        .progress-text {
+            font-size: 12px;
+            font-weight: bold;
+        }
+
+        .progress-status {
+            font-size: 10px;
+            margin-top: 3px;
+            opacity: 0.8;
+        }
+
+        .sector-highlight {
+            background: #fff3cd !important;
+            border-color: #ffc107 !important;
+            animation: sectorPulse 1s ease-in-out infinite;
+        }
+
+        @keyframes sectorPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+
+        /* 响应式设计 */
+        @media (max-width: 768px) {
+            .content-layout {
+                flex-direction: column;
+            }
+            
+            .disk-blocks {
+                grid-template-columns: repeat(3, 1fr);
+            }
+            
+            .control-buttons {
+                flex-direction: column;
+                gap: 10px;
+            }
+            
+            .btn {
+                width: 100%;
+            }
+
+            .disk-container {
+                width: 250px;
+                height: 250px;
+            }
+
+            .disk-details {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- 页面头部 -->
+        <div class="header">
+            <h1>🚀 MySQL索引演进过程</h1>
+            <p>从100条记录的存储问题到B+树索引的完整演进</p>
+        </div>
+
+        <!-- 流程条 -->
+        <div class="progress-bar">
+            <div class="progress-steps">
+                <div class="progress-step active" id="progress-step-1" onclick="showStep(1)">
+                    <div class="step-circle">1</div>
+                    <div class="step-label">100条记录无索引存储</div>
+                </div>
+                <div class="progress-step" id="progress-step-2" onclick="showStep(2)">
+                    <div class="step-circle">2</div>
+                    <div class="step-label">创建一级索引</div>
+                </div>
+                <div class="progress-step" id="progress-step-3" onclick="showStep(3)">
+                    <div class="step-circle">3</div>
+                    <div class="step-label">1000条记录扩展</div>
+                </div>
+                <div class="progress-step" id="progress-step-4" onclick="showStep(4)">
+                    <div class="step-circle">4</div>
+                    <div class="step-label">创建二级索引</div>
+                </div>
+                <div class="progress-step" id="progress-step-5" onclick="showStep(5)">
+                    <div class="step-circle">5</div>
+                    <div class="step-label">B+树演进</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 控制按钮 -->
+        <div class="control-buttons">
+            <button class="btn btn-secondary" id="prevBtn" onclick="prevStep()" disabled>⬅️ 上一步</button>
+            <button class="btn btn-primary" id="nextBtn" onclick="nextStep()">下一步 ➡️</button>
+            <button class="btn btn-secondary" onclick="resetDemo()">🔄 重置</button>
+            <button class="btn btn-success" id="autoBtn" onclick="autoPlay()">▶️ 自动播放</button>
+        </div>
+
+        <!-- 主要内容 -->
+        <div class="main-content">
+            <!-- 步骤说明 -->
+            <div class="step-explanation" id="stepExplanation">
+                <h3>步骤1：100条记录无索引存储</h3>
+                <p>我们从最基础的情况开始：100条用户记录，每条记录128字节，直接存储在磁盘上。</p>
+            </div>
+
+            <!-- 左右布局内容 -->
+            <div class="content-layout">
+                <!-- 左侧面板：数据展示 -->
+                <div class="left-panel">
+                    <div class="panel-title" id="leftPanelTitle">📊 用户数据记录</div>
+                    <div id="dataContent">
+                        <!-- 动态内容将在这里显示 -->
+                    </div>
+                </div>
+
+                <!-- 右侧面板：磁盘结构 -->
+                <div class="right-panel">
+                    <div class="panel-title" id="rightPanelTitle">💾 磁盘存储布局</div>
+                    <div id="diskContent">
+                        <!-- 动态内容将在这里显示 -->
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let currentStep = 1;
+        let isAutoPlaying = false;
+        let autoPlayInterval;
+
+        // 步骤数据
+        const steps = [
+            {
+                title: "100条记录无索引存储",
+                leftTitle: "📊 用户数据记录",
+                rightTitle: "💾 磁盘存储布局",
+                explanation: "我们从最基础的情况开始：100条用户记录，每条记录128字节，直接存储在磁盘上。"
+            },
+            {
+                title: "创建一级索引（密集索引）",
+                leftTitle: "📚 索引结构",
+                rightTitle: "🔗 索引指向数据",
+                explanation: "为了提高查询效率，我们为每条记录创建索引项，形成密集索引结构。"
+            },
+            {
+                title: "1000条记录索引优化",
+                leftTitle: "📈 扩展数据",
+                rightTitle: "🏗️ 索引重组",
+                explanation: "当数据量增长到1000条时，单级索引变得庞大，需要进一步优化。"
+            },
+            {
+                title: "创建二级索引（多级结构）",
+                leftTitle: "🏢 多级索引",
+                rightTitle: "⚡ 快速定位",
+                explanation: "引入二级索引，形成多级结构，大大减少查找时的IO次数。"
+            },
+            {
+                title: "B+树演进（最终形态）",
+                leftTitle: "🌳 B+树结构",
+                rightTitle: "🎯 最优查询",
+                explanation: "最终演进为B+树结构，实现最优的查询性能和存储效率。"
+            }
+        ];
+
+        // 初始化页面
+        function initPage() {
+            showStep(1);
+        }
+
+        // 显示指定步骤
+        function showStep(step) {
+            currentStep = step;
+            updateProgressBar();
+            updateContent();
+            updateButtons();
+        }
+
+        // 更新流程条
+        function updateProgressBar() {
+            for (let i = 1; i <= 5; i++) {
+                const stepElement = document.getElementById(`progress-step-${i}`);
+                stepElement.classList.remove('active', 'completed');
+                
+                if (i < currentStep) {
+                    stepElement.classList.add('completed');
+                } else if (i === currentStep) {
+                    stepElement.classList.add('active');
+                }
+            }
+        }
+
+        // 更新内容
+        function updateContent() {
+            const stepData = steps[currentStep - 1];
+            
+            // 更新标题
+            document.getElementById('leftPanelTitle').textContent = stepData.leftTitle;
+            document.getElementById('rightPanelTitle').textContent = stepData.rightTitle;
+            
+            // 更新说明
+            const explanation = document.getElementById('stepExplanation');
+            explanation.innerHTML = `
+                <h3>步骤${currentStep}：${stepData.title}</h3>
+                <p>${stepData.explanation}</p>
+            `;
+            
+            // 更新左右面板内容
+            updateLeftPanel();
+            updateRightPanel();
+            
+            // 初始化磁盘结构（如果是第一步）
+            initDiskOnFirstStep();
+        }
+
+        // 更新左侧面板
+        function updateLeftPanel() {
+            const content = document.getElementById('dataContent');
+            
+            switch(currentStep) {
+                case 1:
+                    content.innerHTML = generateDataRecords();
+                    break;
+                case 2:
+                    content.innerHTML = generateIndexStructure();
+                    break;
+                case 3:
+                    content.innerHTML = generateExpandedData();
+                    break;
+                case 4:
+                    content.innerHTML = generateMultiLevelIndex();
+                    break;
+                case 5:
+                    content.innerHTML = generateBPlusTree();
+                    break;
+            }
+        }
+
+        // 更新右侧面板
+        function updateRightPanel() {
+            const content = document.getElementById('diskContent');
+            
+            switch(currentStep) {
+                case 1:
+                    content.innerHTML = generateDiskLayout();
+                    break;
+                case 2:
+                    content.innerHTML = generateIndexPointers();
+                    break;
+                case 3:
+                    content.innerHTML = generateExpandedDisk();
+                    break;
+                case 4:
+                    content.innerHTML = generateMultiLevelDisk();
+                    break;
+                case 5:
+                    content.innerHTML = generateBPlusTreeDisk();
+                    break;
+            }
+        }
+
+        // 生成数据记录
+        function generateDataRecords() {
+            let html = `
+                <div class="calculation-box">
+                    <h4>💾 存储计算</h4>
+                    <div class="calculation-step">每条记录：128字节</div>
+                    <div class="calculation-step">磁盘块大小：512字节</div>
+                    <div class="calculation-step">每块记录数：512 ÷ 128 = 4条</div>
+                    <div class="calculation-step">总记录数：100条</div>
+                    <div class="calculation-step">需要块数：100 ÷ 4 = 25个块</div>
+                </div>
+                <h4>📋 用户记录示例（前20条）</h4>
+                <div style="max-height: 300px; overflow-y: auto;">
+            `;
+            
+            for (let i = 1; i <= 20; i++) {
+                html += `
+                    <div class="data-record" onclick="highlightRecord(${i})">
+                        <strong>ID: ${i}</strong> | 姓名: User${i} | 年龄: ${20 + (i % 30)} | 部门: Dept${(i % 5) + 1} | 薪资: ${30000 + (i * 1000)}
+                    </div>
+                `;
+            }
+            
+            html += `
+                </div>
+                <div style="text-align: center; margin-top: 15px; color: #6c757d;">
+                    ... 还有80条记录 ...
+                </div>
+                <button class="btn btn-secondary" onclick="simulateQuery()" style="margin-top: 15px; width: 100%;">
+                    🔍 模拟查询 ID=85
+                </button>
+            `;
+            
+            return html;
+        }
+
+        // 生成磁盘布局
+        function generateDiskLayout() {
+            let html = `
+                <div class="disk-physical-structure">
+                    <h4>💿 磁盘物理结构</h4>
+                    <div class="disk-container">
+                        <div class="disk-platter">
+                            <div class="disk-center"></div>
+                            <div class="disk-tracks" id="diskTracks">
+                                <!-- 磁道和扇区将通过JavaScript动态生成 -->
+                            </div>
+                            <div class="disk-head">
+                                <div class="head-arm" id="headArm"></div>
+                                <div class="read-head"></div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="disk-details">
+                        <div class="detail-row">
+                            <span class="label">当前磁道:</span>
+                            <span class="value" id="currentTrack">0</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="label">当前扇区:</span>
+                            <span class="value" id="currentSector">0</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="label">寻道时间:</span>
+                            <span class="value" id="seekTime">0ms</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="label">旋转延迟:</span>
+                            <span class="value" id="rotationDelay">0ms</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="label">传输时间:</span>
+                            <span class="value" id="transferTime">2ms</span>
+                        </div>
+                        <div class="detail-row">
+                            <span class="label">总I/O时间:</span>
+                            <span class="value" id="totalIOTime">0ms</span>
+                        </div>
+                    </div>
+
+                    <div class="disk-operation-progress">
+                        <div class="progress-title">磁盘操作进度</div>
+                        <div class="progress-steps-disk">
+                            <div class="progress-step-disk" id="seek-progress">
+                                <div class="progress-icon">🎯</div>
+                                <div class="progress-text">寻道定位</div>
+                                <div class="progress-status">待执行</div>
+                            </div>
+                            <div class="progress-step-disk" id="rotation-progress">
+                                <div class="progress-icon">🔄</div>
+                                <div class="progress-text">旋转等待</div>
+                                <div class="progress-status">待执行</div>
+                            </div>
+                            <div class="progress-step-disk" id="io-progress">
+                                <div class="progress-icon">📖</div>
+                                <div class="progress-text">数据读取</div>
+                                <div class="progress-status">待执行</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <h4>🗄️ 磁盘块分布（25个块）</h4>
+                <div class="disk-blocks">
+            `;
+            
+            for (let i = 0; i < 25; i++) {
+                const startId = i * 4 + 1;
+                const endId = Math.min(startId + 3, 100);
+                html += `
+                    <div class="disk-block has-data" onclick="accessBlock(${i})" id="block-${i}">
+                        <strong>Block ${i}</strong>
+                        <div>ID: ${startId}-${endId}</div>
+                        <div style="font-size: 10px; color: #666;">4条记录</div>
+                    </div>
+                `;
+            }
+            
+            html += `
+                </div>
+                <div class="calculation-box">
+                    <h5>🎯 查找问题分析</h5>
+                    <div class="calculation-step">❌ 最坏情况：需要访问所有25个块</div>
+                    <div class="calculation-step">📊 平均情况：需要访问12.5个块</div>
+                    <div class="calculation-step">⏱️ IO成本：每次磁盘访问约10ms</div>
+                    <div class="calculation-step">🔥 总耗时：平均125ms（仅IO时间）</div>
+                </div>
+                <button class="btn btn-primary" onclick="demonstrateDiskAccess()" style="width: 100%; margin-top: 15px;">
+                    🎬 演示磁盘寻址过程
+                </button>
+            `;
+            
+            return html;
+        }
+
+        // 生成索引结构
+        function generateIndexStructure() {
+            return `
+                <h4>📚 密集索引结构</h4>
+                <div class="calculation-box">
+                    <h5>📊 索引计算</h5>
+                    <div class="calculation-step">索引项大小：ID(4字节) + 指针(8字节) = 12字节</div>
+                    <div class="calculation-step">每块索引项：512 ÷ 12 = 42项</div>
+                    <div class="calculation-step">100条记录需要：100 ÷ 42 = 3个索引块</div>
+                </div>
+                <div class="index-structure">
+                    <div class="index-level">
+                        <div class="index-node">索引块1<br>ID: 1-42</div>
+                        <div class="index-node">索引块2<br>ID: 43-84</div>
+                        <div class="index-node">索引块3<br>ID: 85-100</div>
+                    </div>
+                </div>
+                <div style="background: #d1ecf1; padding: 15px; border-radius: 8px; margin-top: 15px;">
+                    <h5>✅ 优化效果</h5>
+                    <div>🎯 查找ID=85：直接定位到索引块3</div>
+                    <div>⚡ IO次数：2次（1次索引块 + 1次数据块）</div>
+                    <div>📈 性能提升：从平均12.5次减少到2次</div>
+                </div>
+            `;
+        }
+
+        // 生成索引指向数据
+        function generateIndexPointers() {
+            return `
+                <h4>🔗 索引指向数据块</h4>
+                <div style="display: flex; flex-direction: column; gap: 20px; align-items: center;">
+                    <div style="background: #e3f2fd; padding: 15px; border-radius: 8px; border: 2px solid #2196f3;">
+                        <strong>索引块3</strong><br>
+                        ID: 85 → Block 21<br>
+                        ID: 86 → Block 21<br>
+                        ID: 87 → Block 21<br>
+                        ID: 88 → Block 21
+                    </div>
+                    <div style="font-size: 24px; color: #6c757d;">⬇️</div>
+                    <div style="background: #d4edda; padding: 15px; border-radius: 8px; border: 2px solid #28a745;">
+                        <strong>数据块21</strong><br>
+                        记录85: User85...<br>
+                        记录86: User86...<br>
+                        记录87: User87...<br>
+                        记录88: User88...
+                    </div>
+                </div>
+                <div style="background: #fff3cd; padding: 15px; border-radius: 8px; margin-top: 20px;">
+                    <h5>🎯 查找过程</h5>
+                    <div>1️⃣ 读取索引块3（1次IO）</div>
+                    <div>2️⃣ 找到ID=85指向Block 21</div>
+                    <div>3️⃣ 读取数据块21（1次IO）</div>
+                    <div>4️⃣ 在块内找到记录85</div>
+                </div>
+            `;
+        }
+
+        // 其他生成函数（简化版本）
+        function generateExpandedData() {
+            return `
+                <h4>📈 1000条记录</h4>
+                <div class="calculation-box">
+                    <div class="calculation-step">记录数量：1000条</div>
+                    <div class="calculation-step">需要数据块：1000 ÷ 4 = 250个</div>
+                    <div class="calculation-step">需要索引块：1000 ÷ 42 = 24个</div>
+                    <div class="calculation-step">问题：索引本身也需要多次IO</div>
+                </div>
+                <div style="background: #f8d7da; padding: 15px; border-radius: 8px;">
+                    <h5>⚠️ 新问题</h5>
+                    <div>索引块太多，查找索引也需要多次IO</div>
+                    <div>需要引入二级索引来解决</div>
+                </div>
+            `;
+        }
+
+        function generateMultiLevelIndex() {
+            return `
+                <h4>🏢 二级索引结构</h4>
+                <div class="index-structure">
+                    <div class="index-level">
+                        <div class="index-node root">根索引<br>指向索引块</div>
+                    </div>
+                    <div class="index-connection"></div>
+                    <div class="index-level">
+                        <div class="index-node">索引块1</div>
+                        <div class="index-node">索引块2</div>
+                        <div class="index-node">...</div>
+                        <div class="index-node">索引块24</div>
+                    </div>
+                    <div class="index-connection"></div>
+                    <div class="index-level">
+                        <div class="index-node">数据块</div>
+                    </div>
+                </div>
+                <div style="background: #d1ecf1; padding: 15px; border-radius: 8px;">
+                    <h5>✅ 优化效果</h5>
+                    <div>🎯 IO次数：3次（根索引 + 索引块 + 数据块）</div>
+                    <div>📈 性能稳定：不随数据量线性增长</div>
+                </div>
+            `;
+        }
+
+        function generateBPlusTree() {
+            return `
+                <h4>🌳 B+树最终形态</h4>
+                <div class="index-structure">
+                    <div class="index-level">
+                        <div class="index-node root">根节点</div>
+                    </div>
+                    <div class="index-connection"></div>
+                    <div class="index-level">
+                        <div class="index-node">内部节点1</div>
+                        <div class="index-node">内部节点2</div>
+                        <div class="index-node">内部节点3</div>
+                    </div>
+                    <div class="index-connection"></div>
+                    <div class="index-level">
+                        <div class="index-node">叶子节点1</div>
+                        <div class="index-node">叶子节点2</div>
+                        <div class="index-node">叶子节点3</div>
+                        <div class="index-node">...</div>
+                    </div>
+                </div>
+                <div style="background: #d4edda; padding: 15px; border-radius: 8px;">
+                    <h5>🎯 B+树特点</h5>
+                    <div>✅ 所有数据在叶子节点</div>
+                    <div>✅ 叶子节点间有链表连接</div>
+                    <div>✅ 支持范围查询</div>
+                    <div>✅ 查询性能稳定O(log n)</div>
+                </div>
+            `;
+        }
+
+        function generateExpandedDisk() {
+            return `<h4>🗄️ 1000条记录需要250个数据块</h4><div style="text-align: center; color: #6c757d;">数据块数量庞大，需要索引优化</div>`;
+        }
+
+        function generateMultiLevelDisk() {
+            return `<h4>⚡ 多级索引快速定位</h4><div style="text-align: center; color: #28a745;">通过二级索引，3次IO即可定位任意记录</div>`;
+        }
+
+        function generateBPlusTreeDisk() {
+            return `<h4>🎯 B+树最优查询</h4><div style="text-align: center; color: #007bff;">无论数据量多大，查询性能都很稳定</div>`;
+        }
+
+        // 更新按钮状态
+        function updateButtons() {
+            document.getElementById('prevBtn').disabled = currentStep === 1;
+            document.getElementById('nextBtn').disabled = currentStep === 5;
+        }
+
+        // 导航函数
+        function nextStep() {
+            if (currentStep < 5) {
+                showStep(currentStep + 1);
+            }
+        }
+
+        function prevStep() {
+            if (currentStep > 1) {
+                showStep(currentStep - 1);
+            }
+        }
+
+        // 重置演示
+        function resetDemo() {
+            stopAutoPlay();
+            showStep(1);
+        }
+
+        // 自动播放
+        function autoPlay() {
+            if (isAutoPlaying) {
+                stopAutoPlay();
+            } else {
+                startAutoPlay();
+            }
+        }
+
+        function startAutoPlay() {
+            isAutoPlaying = true;
+            document.getElementById('autoBtn').textContent = '⏸️ 暂停';
+            
+            autoPlayInterval = setInterval(() => {
+                if (currentStep < 5) {
+                    nextStep();
+                } else {
+                    stopAutoPlay();
+                }
+            }, 3000);
+        }
+
+        function stopAutoPlay() {
+            isAutoPlaying = false;
+            document.getElementById('autoBtn').textContent = '▶️ 自动播放';
+            if (autoPlayInterval) {
+                clearInterval(autoPlayInterval);
+            }
+        }
+
+        // 交互功能
+        function highlightRecord(id) {
+            // 高亮显示记录
+            const records = document.querySelectorAll('.data-record');
+            records.forEach(record => record.classList.remove('highlight'));
+            records[id - 1]?.classList.add('highlight');
+        }
+
+        function accessBlock(blockId) {
+            // 模拟访问磁盘块
+            const block = document.getElementById(`block-${blockId}`);
+            block.classList.add('accessing');
+            setTimeout(() => {
+                block.classList.remove('accessing');
+                block.classList.add('found');
+            }, 1000);
+        }
+
+        function simulateQuery() {
+            // 模拟查询ID=85的过程
+            const blocks = document.querySelectorAll('.disk-block');
+            blocks.forEach(block => {
+                block.classList.remove('accessing', 'found');
+            });
+            
+            // 模拟逐个访问块
+            let currentBlock = 0;
+            const interval = setInterval(() => {
+                if (currentBlock > 0) {
+                    document.getElementById(`block-${currentBlock - 1}`).classList.remove('accessing');
+                }
+                
+                if (currentBlock < 25) {
+                    document.getElementById(`block-${currentBlock}`).classList.add('accessing');
+                    
+                    // 如果是包含ID=85的块（块21），则找到
+                    if (currentBlock === 21) {
+                        setTimeout(() => {
+                            document.getElementById(`block-${currentBlock}`).classList.remove('accessing');
+                            document.getElementById(`block-${currentBlock}`).classList.add('found');
+                            clearInterval(interval);
+                            alert('找到了！ID=85在Block 21中，总共访问了22个块');
+                        }, 500);
+                        return;
+                    }
+                    
+                    currentBlock++;
+                } else {
+                    clearInterval(interval);
+                }
+            }, 200);
+        }
+
+        // 磁盘物理结构相关变量
+        let diskStructure = {
+            tracks: 6,        // 磁道数
+            sectorsPerTrack: 12,  // 每磁道扇区数
+            currentTrack: 0,
+            currentSector: 0,
+            sectors: []       // 扇区数据映射
+        };
+
+        // 初始化磁盘物理结构
+        function initDiskStructure() {
+            const tracksContainer = document.getElementById('diskTracks');
+            if (!tracksContainer) return;
+            
+            tracksContainer.innerHTML = '';
+            
+            // 创建磁道
+            for (let track = 0; track < diskStructure.tracks; track++) {
+                const trackElement = document.createElement('div');
+                trackElement.className = 'disk-track';
+                const radius = 40 + track * 20;
+                trackElement.style.width = radius * 2 + 'px';
+                trackElement.style.height = radius * 2 + 'px';
+                tracksContainer.appendChild(trackElement);
+                
+                // 在每个磁道上创建扇区
+                for (let sector = 0; sector < diskStructure.sectorsPerTrack; sector++) {
+                    const sectorElement = document.createElement('div');
+                    sectorElement.className = 'disk-sector';
+                    sectorElement.style.height = radius + 'px';
+                    sectorElement.style.transform = `rotate(${sector * 30}deg)`;
+                    sectorElement.id = `sector-${track}-${sector}`;
+                    trackElement.appendChild(sectorElement);
+                }
+            }
+            
+            // 随机分配一些扇区给数据块
+            diskStructure.sectors = [];
+            for (let i = 0; i < 25; i++) {
+                const track = Math.floor(Math.random() * diskStructure.tracks);
+                const sector = Math.floor(Math.random() * diskStructure.sectorsPerTrack);
+                diskStructure.sectors.push({ track, sector, blockId: i });
+            }
+        }
+
+        // 演示磁盘寻址过程
+        async function demonstrateDiskAccess() {
+            // 重置状态
+            resetDiskProgress();
+            
+            // 模拟查找Block 21 (包含ID=85的块)
+            const targetBlock = diskStructure.sectors.find(s => s.blockId === 21);
+            if (!targetBlock) return;
+            
+            const { track: targetTrack, sector: targetSector } = targetBlock;
+            
+            // 步骤1：寻道定位
+            await updateDiskProgress('seek-progress', 'active', '执行中');
+            await simulateDiskSeek(targetTrack);
+            await updateDiskProgress('seek-progress', 'completed', '完成');
+            
+            // 步骤2：旋转等待
+            await updateDiskProgress('rotation-progress', 'active', '执行中');
+            await simulateDiskRotation(targetSector);
+            await updateDiskProgress('rotation-progress', 'completed', '完成');
+            
+            // 步骤3：数据读取
+            await updateDiskProgress('io-progress', 'active', '执行中');
+            await simulateDataRead(targetTrack, targetSector);
+            await updateDiskProgress('io-progress', 'completed', '完成');
+            
+            // 计算总时间
+            const seekTime = Math.abs(targetTrack - diskStructure.currentTrack) * 2;
+            const rotationDelay = Math.random() * 8 + 2;
+            const transferTime = 2;
+            const totalTime = seekTime + rotationDelay + transferTime;
+            
+            document.getElementById('totalIOTime').textContent = totalTime.toFixed(1) + 'ms';
+            
+            alert(`磁盘寻址完成！\n目标位置：磁道${targetTrack}，扇区${targetSector}\n总耗时：${totalTime.toFixed(1)}ms`);
+        }
+
+        // 模拟磁盘寻道
+        async function simulateDiskSeek(targetTrack) {
+            const currentTrack = diskStructure.currentTrack;
+            const seekTime = Math.abs(targetTrack - currentTrack) * 2;
+            
+            document.getElementById('currentTrack').textContent = targetTrack;
+            document.getElementById('seekTime').textContent = seekTime + 'ms';
+            
+            // 移动磁头臂
+            const headArm = document.getElementById('headArm');
+            if (headArm) {
+                const armPosition = 10 + targetTrack * 20;
+                headArm.style.width = armPosition + 'px';
+            }
+            
+            diskStructure.currentTrack = targetTrack;
+            
+            return new Promise(resolve => {
+                setTimeout(resolve, 1000);
+            });
+        }
+
+        // 模拟磁盘旋转
+        async function simulateDiskRotation(targetSector) {
+            const rotationDelay = Math.random() * 8 + 2;
+            
+            document.getElementById('currentSector').textContent = targetSector;
+            document.getElementById('rotationDelay').textContent = rotationDelay.toFixed(1) + 'ms';
+            
+            diskStructure.currentSector = targetSector;
+            
+            return new Promise(resolve => {
+                setTimeout(resolve, 1000);
+            });
+        }
+
+        // 模拟数据读取
+        async function simulateDataRead(track, sector) {
+            const transferTime = 2;
+            document.getElementById('transferTime').textContent = transferTime + 'ms';
+            
+            // 高亮目标扇区
+            const sectorElement = document.getElementById(`sector-${track}-${sector}`);
+            if (sectorElement) {
+                sectorElement.classList.add('sector-highlight');
+                setTimeout(() => {
+                    sectorElement.classList.remove('sector-highlight');
+                }, 2000);
+            }
+            
+            return new Promise(resolve => {
+                setTimeout(resolve, 1000);
+            });
+        }
+
+        // 更新磁盘操作进度
+        async function updateDiskProgress(stepId, status, statusText) {
+            const step = document.getElementById(stepId);
+            if (!step) return;
+            
+            step.classList.remove('active', 'completed');
+            step.classList.add(status);
+            
+            const statusElement = step.querySelector('.progress-status');
+            if (statusElement) {
+                statusElement.textContent = statusText;
+            }
+            
+            return new Promise(resolve => {
+                setTimeout(resolve, 300);
+            });
+        }
+
+        // 重置磁盘进度
+        function resetDiskProgress() {
+            const steps = ['seek-progress', 'rotation-progress', 'io-progress'];
+            steps.forEach(stepId => {
+                const step = document.getElementById(stepId);
+                if (step) {
+                    step.classList.remove('active', 'completed');
+                    const statusElement = step.querySelector('.progress-status');
+                    if (statusElement) {
+                        statusElement.textContent = '待执行';
+                    }
+                }
+            });
+            
+            // 重置显示值
+            document.getElementById('currentTrack').textContent = '0';
+            document.getElementById('currentSector').textContent = '0';
+            document.getElementById('seekTime').textContent = '0ms';
+            document.getElementById('rotationDelay').textContent = '0ms';
+            document.getElementById('totalIOTime').textContent = '0ms';
+        }
+
+        // 扩展updateContent函数以包含磁盘初始化
+        function initDiskOnFirstStep() {
+            // 如果是第一步，初始化磁盘结构
+            if (currentStep === 1) {
+                setTimeout(() => {
+                    initDiskStructure();
+                    // 绑定磁盘演示按钮事件
+                    const diskDemoBtn = document.getElementById('diskDemoBtn');
+                    if (diskDemoBtn) {
+                        diskDemoBtn.onclick = demonstrateDiskAccess;
+                    }
+                }, 100);
+            }
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', initPage);
+    </script>
+</body>
+</html>

@@ -1,0 +1,1250 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MySQL事务机制工作流演示</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 15px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50 0%, #34495e 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .workflow-container {
+            padding: 30px;
+        }
+
+        .workflow-header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .workflow-title {
+            font-size: 2em;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+
+        .workflow-subtitle {
+            color: #6c757d;
+            font-size: 1.1em;
+        }
+
+        .progress-bar {
+            background: #e9ecef;
+            height: 8px;
+            border-radius: 4px;
+            margin: 20px 0;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            background: linear-gradient(90deg, #28a745, #20c997);
+            height: 100%;
+            width: 0%;
+            transition: width 0.5s ease;
+        }
+
+        .step-indicator {
+            display: flex;
+            justify-content: space-between;
+            margin: 30px 0;
+            position: relative;
+        }
+
+        .step-indicator::before {
+            content: '';
+            position: absolute;
+            top: 20px;
+            left: 0;
+            right: 0;
+            height: 2px;
+            background: #e9ecef;
+            z-index: 1;
+        }
+
+        .step {
+            background: white;
+            border: 3px solid #e9ecef;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            color: #6c757d;
+            position: relative;
+            z-index: 2;
+            transition: all 0.3s ease;
+        }
+
+        .step.completed {
+            background: #28a745;
+            border-color: #28a745;
+            color: white;
+        }
+
+        .step.active {
+            background: #007bff;
+            border-color: #007bff;
+            color: white;
+            transform: scale(1.2);
+        }
+
+        .step-content {
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 30px;
+            margin: 30px 0;
+            border-left: 5px solid #007bff;
+            box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+        }
+
+        .step-title {
+            font-size: 1.5em;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .step-description {
+            color: #6c757d;
+            margin-bottom: 20px;
+            line-height: 1.6;
+        }
+
+        .demo-area {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            border: 2px solid #e9ecef;
+        }
+
+        .sql-windows {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .sql-window {
+            background: #2d3748;
+            border-radius: 10px;
+            padding: 20px;
+            color: white;
+            font-family: 'Courier New', monospace;
+        }
+
+        .window-title {
+            background: #4a5568;
+            color: white;
+            padding: 10px 15px;
+            border-radius: 5px 5px 0 0;
+            margin: -20px -20px 15px -20px;
+            font-weight: bold;
+        }
+
+        .sql-command {
+            background: #1a202c;
+            border: 1px solid #4a5568;
+            border-radius: 5px;
+            padding: 10px;
+            margin: 10px 0;
+            color: #e2e8f0;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+        }
+
+        .sql-result {
+            background: #2d3748;
+            border: 1px solid #4a5568;
+            border-radius: 5px;
+            padding: 10px;
+            margin: 10px 0;
+            color: #68d391;
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+        }
+
+        .account-status {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 2px solid #e9ecef;
+        }
+
+        .account-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 10px 0;
+        }
+
+        .account-table th,
+        .account-table td {
+            padding: 12px;
+            text-align: left;
+            border: 1px solid #dee2e6;
+        }
+
+        .account-table th {
+            background: #f8f9fa;
+            font-weight: bold;
+            color: #495057;
+        }
+
+        .account-table tr:nth-child(even) {
+            background: #f8f9fa;
+        }
+
+        .balance-change {
+            transition: all 0.5s ease;
+        }
+
+        .balance-increase {
+            background: #d4edda !important;
+            color: #155724;
+        }
+
+        .balance-decrease {
+            background: #f8d7da !important;
+            color: #721c24;
+        }
+
+        /* 隔离级别信息样式 */
+        .isolation-info {
+            background: #f8f9fa;
+            border: 1px solid #dee2e6;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+
+        .isolation-sessions {
+            display: flex;
+            gap: 20px;
+            margin-top: 15px;
+        }
+
+        .session-info {
+            flex: 1;
+            background: white;
+            border: 1px solid #ddd;
+            border-radius: 6px;
+            padding: 15px;
+        }
+
+        .session-info h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+            font-size: 14px;
+        }
+
+        /* 锁状态样式 */
+        #lock-alice, #lock-bob {
+            font-weight: bold;
+        }
+
+        .lock-held {
+            color: #dc3545;
+            background: #f8d7da;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .lock-waiting {
+            color: #856404;
+            background: #fff3cd;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .lock-free {
+            color: #155724;
+            background: #d4edda;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
+        .control-panel {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 2px solid #28a745;
+            text-align: center;
+        }
+
+        .control-button {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 25px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 0 10px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 15px rgba(40, 167, 69, 0.3);
+        }
+
+        .control-button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 20px rgba(40, 167, 69, 0.4);
+        }
+
+        .control-button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
+        .reset-button {
+            background: linear-gradient(135deg, #dc3545 0%, #c82333 100%);
+            box-shadow: 0 4px 15px rgba(220, 53, 69, 0.3);
+        }
+
+        .reset-button:hover {
+            box-shadow: 0 6px 20px rgba(220, 53, 69, 0.4);
+        }
+
+        .highlight-box {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+            color: #856404;
+        }
+
+        .success-box {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+            color: #155724;
+        }
+
+        .error-box {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 5px;
+            padding: 15px;
+            margin: 15px 0;
+            color: #721c24;
+        }
+
+        .scenario-selector {
+            background: white;
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            border: 2px solid #007bff;
+        }
+
+        .scenario-button {
+            background: #007bff;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 20px;
+            margin: 5px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .scenario-button:hover {
+            background: #0056b3;
+            transform: translateY(-1px);
+        }
+
+        .scenario-button.active {
+            background: #28a745;
+        }
+
+        /* 读现象对比表格样式 */
+        .read-phenomena-table {
+            margin-top: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+
+        .read-phenomena-table h4 {
+            margin: 0 0 15px 0;
+            color: #495057;
+            font-size: 16px;
+            text-align: center;
+        }
+
+        .read-phenomena-table table {
+            width: 100%;
+            border-collapse: collapse;
+            background-color: white;
+            border-radius: 6px;
+            overflow: hidden;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .read-phenomena-table th {
+            background-color: #6c757d;
+            color: white;
+            padding: 12px 8px;
+            text-align: center;
+            font-weight: 600;
+            font-size: 13px;
+        }
+
+        .read-phenomena-table td {
+            padding: 10px 8px;
+            text-align: center;
+            border-bottom: 1px solid #dee2e6;
+            font-size: 12px;
+        }
+
+        .read-phenomena-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .read-phenomena-table tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        .read-phenomena-table .problem {
+            color: #dc3545;
+            font-weight: 600;
+        }
+
+        .read-phenomena-table .good {
+            color: #28a745;
+            font-weight: 600;
+        }
+
+        .read-phenomena-table .medium {
+            color: #ffc107;
+            font-weight: 600;
+        }
+
+        @media (max-width: 768px) {
+            .sql-windows {
+                grid-template-columns: 1fr;
+            }
+            
+            .control-button {
+                display: block;
+                margin: 10px auto;
+                width: 200px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>MySQL事务机制工作流演示</h1>
+            <p>通过银行转账场景，一步步理解事务的ACID特性</p>
+        </div>
+
+        <div class="workflow-container">
+            <!-- 场景选择器 -->
+            <div class="scenario-selector">
+                <h3>选择演示场景：</h3>
+                <button class="scenario-button active" onclick="selectScenario('normal')">正常转账</button>
+                <button class="scenario-button" onclick="selectScenario('rollback')">转账失败回滚</button>
+                <button class="scenario-button" onclick="selectScenario('isolation')">隔离级别对比</button>
+                <button class="scenario-button" onclick="selectScenario('deadlock')">死锁演示 - 经典循环等待</button>
+                <button class="scenario-button" onclick="selectScenario('deadlock2')">死锁演示 - 插入意向锁</button>
+                <button class="scenario-button" onclick="selectScenario('deadlock3')">死锁演示 - 间隙锁冲突</button>
+            </div>
+
+            <!-- 工作流标题 -->
+            <div class="workflow-header">
+                <h2 class="workflow-title" id="workflow-title">正常转账流程演示</h2>
+                <p class="workflow-subtitle" id="workflow-subtitle">演示事务的原子性和一致性保证</p>
+            </div>
+
+            <!-- 进度条 -->
+            <div class="progress-bar">
+                <div class="progress-fill" id="progress-fill"></div>
+            </div>
+
+            <!-- 步骤指示器 -->
+            <div class="step-indicator" id="step-indicator">
+                <div class="step active" id="step-1">1</div>
+                <div class="step" id="step-2">2</div>
+                <div class="step" id="step-3">3</div>
+                <div class="step" id="step-4">4</div>
+                <div class="step" id="step-5">5</div>
+            </div>
+
+            <!-- 控制面板 -->
+            <div class="control-panel">
+                <button class="control-button" id="prev-button" onclick="prevStep()" disabled>上一步</button>
+                <button class="control-button" id="next-button" onclick="nextStep()">下一步</button>
+                <button class="control-button reset-button" onclick="resetDemo()">重置演示</button>
+            </div>
+
+            <!-- 当前步骤内容 -->
+            <div class="step-content" id="step-content">
+                <!-- 步骤内容将通过JavaScript动态生成 -->
+            </div>
+
+            <!-- 账户状态显示 -->
+            <div class="account-status">
+                <h3>💰 账户状态</h3>
+                <table class="account-table">
+                    <thead>
+                        <tr>
+                            <th>账户名</th>
+                            <th>账户号</th>
+                            <th>余额</th>
+                            <th>状态</th>
+                            <th>锁状态</th>
+                        </tr>
+                    </thead>
+                    <tbody id="account-tbody">
+                        <tr id="account-alice">
+                            <td>Alice</td>
+                            <td>1001</td>
+                            <td class="balance" id="balance-alice">¥10,000.00</td>
+                            <td id="status-alice">正常</td>
+                            <td id="lock-alice">无锁</td>
+                        </tr>
+                        <tr id="account-bob">
+                            <td>Bob</td>
+                            <td>1002</td>
+                            <td class="balance" id="balance-bob">¥5,000.00</td>
+                            <td id="status-bob">正常</td>
+                            <td id="lock-bob">无锁</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- 隔离级别信息显示 -->
+            <div class="isolation-info" id="isolation-info" style="display: none;">
+                <h3>🔒 隔离级别信息</h3>
+                <div class="isolation-sessions">
+                    <div class="session-info">
+                        <h4>会话A (READ COMMITTED)</h4>
+                        <div id="session-a-value">余额: ¥10,000.00</div>
+                    </div>
+                    <div class="session-info">
+                        <h4>会话B (REPEATABLE READ)</h4>
+                        <div id="session-b-value">余额: ¥10,000.00</div>
+                    </div>
+                </div>
+                
+                <div class="read-phenomena-table">
+                    <h4>读现象对比表</h4>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>隔离级别</th>
+                                <th>脏读</th>
+                                <th>不可重复读</th>
+                                <th>幻读</th>
+                                <th>性能</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr>
+                                <td>READ UNCOMMITTED</td>
+                                <td class="problem">✓ 可能</td>
+                                <td class="problem">✓ 可能</td>
+                                <td class="problem">✓ 可能</td>
+                                <td class="good">最高</td>
+                            </tr>
+                            <tr>
+                                <td>READ COMMITTED</td>
+                                <td class="good">✗ 避免</td>
+                                <td class="problem">✓ 可能</td>
+                                <td class="problem">✓ 可能</td>
+                                <td class="good">较高</td>
+                            </tr>
+                            <tr>
+                                <td>REPEATABLE READ</td>
+                                <td class="good">✗ 避免</td>
+                                <td class="good">✗ 避免</td>
+                                <td class="problem">✓ 可能</td>
+                                <td class="medium">中等</td>
+                            </tr>
+                            <tr>
+                                <td>SERIALIZABLE</td>
+                                <td class="good">✗ 避免</td>
+                                <td class="good">✗ 避免</td>
+                                <td class="good">✗ 避免</td>
+                                <td class="problem">最低</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // 全局变量
+        let currentStep = 1;
+        let currentScenario = 'normal';
+        let maxSteps = 5;
+
+        // 场景配置
+        const scenarios = {
+            normal: {
+                title: '正常转账流程演示',
+                subtitle: '演示事务的原子性和一致性保证',
+                steps: [
+                    {
+                        title: '🚀 开始事务',
+                        description: '启动一个新的数据库事务，确保后续操作的原子性。',
+                        sql: 'BEGIN;',
+                        result: 'Query OK, 0 rows affected',
+                        explanation: '事务开始，所有后续操作将在同一个事务中执行。'
+                    },
+                    {
+                        title: '🔍 检查余额',
+                        description: '查询转出账户的当前余额，确保有足够资金进行转账。',
+                        sql: 'SELECT balance FROM accounts WHERE account_id = 1001;',
+                        result: '| balance |\n|---------|  \n| 10000.00|',
+                        explanation: 'Alice账户余额充足，可以进行1000元转账。'
+                    },
+                    {
+                        title: '💸 扣减余额',
+                        description: '从转出账户扣减转账金额。',
+                        sql: 'UPDATE accounts SET balance = balance - 1000 WHERE account_id = 1001;',
+                        result: 'Query OK, 1 row affected',
+                        explanation: 'Alice账户余额减少1000元，当前余额9000元。',
+                        balanceChange: { alice: 9000 }
+                    },
+                    {
+                        title: '💰 增加余额',
+                        description: '向转入账户增加转账金额。',
+                        sql: 'UPDATE accounts SET balance = balance + 1000 WHERE account_id = 1002;',
+                        result: 'Query OK, 1 row affected',
+                        explanation: 'Bob账户余额增加1000元，当前余额6000元。',
+                        balanceChange: { bob: 6000 }
+                    },
+                    {
+                        title: '✅ 提交事务',
+                        description: '提交事务，使所有更改永久生效。',
+                        sql: 'COMMIT;',
+                        result: 'Query OK, 0 rows affected',
+                        explanation: '转账成功完成！所有更改已永久保存到数据库。'
+                    }
+                ]
+            },
+            rollback: {
+                title: '转账失败回滚演示',
+                subtitle: '演示事务的回滚机制和数据一致性',
+                steps: [
+                    {
+                        title: '🚀 开始事务',
+                        description: '启动一个新的数据库事务。',
+                        sql: 'BEGIN;',
+                        result: 'Query OK, 0 rows affected',
+                        explanation: '事务开始，准备进行转账操作。'
+                    },
+                    {
+                        title: '💸 扣减余额',
+                        description: '从转出账户扣减转账金额。',
+                        sql: 'UPDATE accounts SET balance = balance - 1000 WHERE account_id = 1001;',
+                        result: 'Query OK, 1 row affected',
+                        explanation: 'Alice账户余额减少1000元。',
+                        balanceChange: { alice: 9000 }
+                    },
+                    {
+                        title: '❌ 转账失败',
+                        description: '模拟转账过程中发生错误（如网络中断、系统故障等）。',
+                        sql: '-- 模拟系统错误\nSELECT 1/0;',
+                        result: 'ERROR 1365: Division by zero',
+                        explanation: '转账过程中发生错误，需要回滚事务。'
+                    },
+                    {
+                        title: '🔄 回滚事务',
+                        description: '由于错误发生，回滚事务以保持数据一致性。',
+                        sql: 'ROLLBACK;',
+                        result: 'Query OK, 0 rows affected',
+                        explanation: '事务回滚，所有更改被撤销。',
+                        balanceChange: { alice: 10000, bob: 5000 }
+                    },
+                    {
+                        title: '🔍 验证回滚',
+                        description: '验证账户余额已恢复到事务开始前的状态。',
+                        sql: 'SELECT account_id, balance FROM accounts WHERE account_id IN (1001, 1002);',
+                        result: '| account_id | balance |\n|------------|---------|  \n| 1001       | 10000.00|\n| 1002       | 5000.00 |',
+                        explanation: '数据完全恢复，保证了数据的一致性。'
+                    }
+                ]
+            },
+            isolation: {
+                title: '事务隔离级别与读现象演示',
+                subtitle: '清晰展示脏读、不可重复读、幻读等并发读取问题',
+                steps: [
+                    {
+                        title: '📋 演示概览',
+                        description: '本演示将展示四种隔离级别和三种读现象。',
+                        sql: '-- 四种隔离级别：\n-- READ UNCOMMITTED (脏读)\n-- READ COMMITTED (不可重复读)\n-- REPEATABLE READ (幻读)\n-- SERIALIZABLE (无并发问题)',
+                        result: '准备演示环境',
+                        explanation: '我们将逐一演示脏读、不可重复读、幻读现象，以及各隔离级别如何解决这些问题。'
+                    },
+                    {
+                        title: '💀 脏读演示 - READ UNCOMMITTED',
+                        description: '演示READ UNCOMMITTED级别下的脏读现象。',
+                        sql: '-- 会话A (READ UNCOMMITTED)\nSET SESSION TRANSACTION ISOLATION LEVEL READ UNCOMMITTED;\nBEGIN;\nSELECT balance FROM accounts WHERE account_id = 1001;',
+                        result: 'Alice余额: 10000.00',
+                        explanation: '会话A设置为READ UNCOMMITTED级别，读取Alice初始余额。'
+                    },
+                    {
+                        title: '✏️ 未提交的修改',
+                        description: '会话B修改数据但不提交。',
+                        sql: '-- 会话B\nBEGIN;\nUPDATE accounts SET balance = 5000 WHERE account_id = 1001;\n-- 注意：未提交！',
+                        result: '修改成功，但未提交',
+                        explanation: '会话B将Alice余额改为5000，但事务未提交，数据处于未确定状态。',
+                        balanceChange: { alice: 5000 }
+                    },
+                    {
+                        title: '👻 脏读发生！',
+                        description: '会话A读取到未提交的数据。',
+                        sql: '-- 会话A (READ UNCOMMITTED)\nSELECT balance FROM accounts WHERE account_id = 1001;',
+                        result: 'Alice余额: 5000.00 ⚠️ 脏读！',
+                        explanation: '🚨 脏读现象：READ UNCOMMITTED读取到了未提交的数据！这是最危险的读取。'
+                    },
+                    {
+                        title: '🔄 脏读的危险',
+                        description: '会话B回滚，脏读的数据消失。',
+                        sql: '-- 会话B\nROLLBACK;\n-- 会话A再次读取\nSELECT balance FROM accounts WHERE account_id = 1001;',
+                        result: 'Alice余额: 10000.00 (回到原值)',
+                        explanation: '💥 脏读危险：基于5000余额的业务决策是错误的！数据又变回10000了。',
+                        balanceChange: { alice: 10000 }
+                    },
+                    {
+                        title: '🔄 不可重复读演示 - READ COMMITTED',
+                        description: '演示READ COMMITTED级别下的不可重复读。',
+                        sql: '-- 会话C (READ COMMITTED)\nSET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED;\nBEGIN;\nSELECT balance FROM accounts WHERE account_id = 1001;',
+                        result: 'Alice余额: 10000.00',
+                        explanation: '会话C设置为READ COMMITTED，避免脏读，但可能出现不可重复读。'
+                    },
+                    {
+                        title: '✅ 其他事务提交修改',
+                        description: '会话D修改数据并提交。',
+                        sql: '-- 会话D\nBEGIN;\nUPDATE accounts SET balance = 8000 WHERE account_id = 1001;\nCOMMIT;',
+                        result: '修改并提交成功',
+                        explanation: '会话D将Alice余额改为8000并提交，数据已确定生效。',
+                        balanceChange: { alice: 8000 }
+                    },
+                    {
+                        title: '🔄 不可重复读发生！',
+                        description: '会话C在同一事务中再次读取，结果不同。',
+                        sql: '-- 会话C (同一事务内)\nSELECT balance FROM accounts WHERE account_id = 1001;',
+                        result: 'Alice余额: 8000.00 ⚠️ 不可重复读！',
+                        explanation: '🚨 不可重复读：同一事务内两次读取同一行，结果不同！从10000变成8000。'
+                    },
+                    {
+                        title: '👻 幻读演示 - REPEATABLE READ',
+                        description: '演示REPEATABLE READ级别下的幻读现象。',
+                        sql: '-- 会话E (REPEATABLE READ)\nSET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ;\nBEGIN;\nSELECT COUNT(*) FROM accounts WHERE balance > 5000;',
+                        result: '符合条件的记录数: 2',
+                        explanation: '会话E设置为REPEATABLE READ，避免不可重复读，但可能出现幻读。'
+                    },
+                    {
+                        title: '➕ 插入新记录',
+                        description: '会话F插入新的账户记录。',
+                        sql: '-- 会话F\nBEGIN;\nINSERT INTO accounts (account_id, account_name, balance) \nVALUES (1003, \'Charlie\', 12000);\nCOMMIT;',
+                        result: '插入成功',
+                        explanation: '会话F插入Charlie账户，余额12000，满足balance > 5000条件。'
+                    },
+                    {
+                        title: '👻 幻读发生！',
+                        description: '会话E再次执行相同查询，结果集变化。',
+                        sql: '-- 会话E (同一事务内)\nSELECT COUNT(*) FROM accounts WHERE balance > 5000;',
+                        result: '符合条件的记录数: 3 ⚠️ 幻读！',
+                        explanation: '🚨 幻读现象：同一事务内相同查询，结果集行数变化！从2条变成3条记录。'
+                    },
+                    {
+                        title: '🔒 SERIALIZABLE - 完全隔离',
+                        description: '演示SERIALIZABLE级别完全避免并发问题。',
+                        sql: '-- 会话G (SERIALIZABLE)\nSET SESSION TRANSACTION ISOLATION LEVEL SERIALIZABLE;\nBEGIN;\nSELECT * FROM accounts WHERE balance > 5000;',
+                        result: '3条记录，完全锁定',
+                        explanation: 'SERIALIZABLE级别通过锁机制完全避免脏读、不可重复读、幻读。'
+                    },
+                    {
+                        title: '⚡ SERIALIZABLE的代价',
+                        description: '其他事务被完全阻塞。',
+                        sql: '-- 会话H尝试修改\nBEGIN;\nUPDATE accounts SET balance = 9000 WHERE account_id = 1001;',
+                        result: '等待中... (被SERIALIZABLE阻塞)',
+                        explanation: '⚖️ SERIALIZABLE代价：最高一致性，但并发性能最低，其他事务被阻塞。'
+                    },
+                    {
+                        title: '📊 总结对比',
+                        description: '四种隔离级别的读现象对比总结。',
+                        sql: '-- 隔离级别对比：\n-- READ UNCOMMITTED: 脏读 ✓ 不可重复读 ✓ 幻读 ✓\n-- READ COMMITTED:   脏读 ✗ 不可重复读 ✓ 幻读 ✓\n-- REPEATABLE READ:  脏读 ✗ 不可重复读 ✗ 幻读 ✓\n-- SERIALIZABLE:     脏读 ✗ 不可重复读 ✗ 幻读 ✗',
+                        result: '演示完成',
+                        explanation: '✅ 隔离级别越高，读现象越少，但性能代价越大。实际应用需要权衡一致性和性能。'
+                    }
+                ]
+            },
+            deadlock: {
+                title: '死锁产生与检测演示',
+                subtitle: '演示死锁的产生过程和MySQL的自动检测机制',
+                steps: [
+                    {
+                        title: '🚀 开始两个事务',
+                        description: '在两个会话中同时开始事务，准备演示死锁。',
+                        sql: '-- 会话A\nBEGIN;\n-- 会话B\nBEGIN;',
+                        result: 'Query OK, 0 rows affected (2 sessions)',
+                        explanation: '两个事务同时开始，准备进行可能导致死锁的操作。'
+                    },
+                    {
+                        title: '🔒 事务A锁定Alice',
+                        description: '事务A更新Alice的账户，获得行锁。',
+                        sql: '-- 会话A\nUPDATE accounts SET balance = balance - 500 WHERE account_id = 1001;',
+                        result: 'Query OK, 1 row affected',
+                        explanation: '事务A成功获得Alice账户的排他锁。',
+                        balanceChange: { alice: 9500 },
+                        lockInfo: { alice: 'A' }
+                    },
+                    {
+                        title: '🔒 事务B锁定Bob',
+                        description: '事务B更新Bob的账户，获得行锁。',
+                        sql: '-- 会话B\nUPDATE accounts SET balance = balance - 300 WHERE account_id = 1002;',
+                        result: 'Query OK, 1 row affected',
+                        explanation: '事务B成功获得Bob账户的排他锁。',
+                        balanceChange: { bob: 4700 },
+                        lockInfo: { bob: 'B' }
+                    },
+                    {
+                        title: '⏳ 事务A等待Bob锁',
+                        description: '事务A尝试更新Bob账户，但需要等待事务B释放锁。',
+                        sql: '-- 会话A\nUPDATE accounts SET balance = balance + 500 WHERE account_id = 1002;',
+                        result: '等待中... (Lock wait timeout)',
+                        explanation: '事务A被阻塞，等待事务B释放Bob账户的锁。',
+                        lockInfo: { alice: 'A', bob: 'B', waitA: 'Bob' }
+                    },
+                    {
+                        title: '💀 死锁产生',
+                        description: '事务B尝试更新Alice账户，形成死锁。',
+                        sql: '-- 会话B\nUPDATE accounts SET balance = balance + 300 WHERE account_id = 1001;',
+                        result: 'ERROR 1213: Deadlock found when trying to get lock',
+                        explanation: '死锁检测！事务B被回滚，事务A继续执行。',
+                        balanceChange: { alice: 9500, bob: 5000 },
+                        lockInfo: { alice: 'A' }
+                    },
+                    {
+                        title: '🔄 死锁解决',
+                        description: 'MySQL自动回滚事务B，事务A完成操作并提交。',
+                        sql: '-- 事务A继续\nCOMMIT;\n-- 事务B已被回滚',
+                        result: 'Query OK, 0 rows affected',
+                        explanation: '死锁自动解决，事务A成功完成，事务B被回滚。',
+                        balanceChange: { alice: 9500, bob: 5500 },
+                        lockInfo: {}
+                    }
+                ]
+            },
+            deadlock2: {
+                title: '死锁演示 - 插入意向锁',
+                subtitle: '演示插入意向锁导致的死锁场景',
+                steps: [
+                    {
+                        title: '🏗️ 准备测试环境',
+                        description: '创建带有唯一索引的测试表。',
+                        sql: 'CREATE TABLE test_insert (\n  id INT PRIMARY KEY,\n  name VARCHAR(50),\n  UNIQUE KEY uk_name (name)\n);\nINSERT INTO test_insert VALUES (1, \'Alice\'), (10, \'Bob\');',
+                        result: 'Query OK, 2 rows affected',
+                        explanation: '创建测试表，包含主键和唯一索引，为插入意向锁演示做准备。'
+                    },
+                    {
+                        title: '🔒 事务A获取间隙锁',
+                        description: '事务A查询不存在的记录，获取间隙锁。',
+                        sql: '-- 会话A\nBEGIN;\nSELECT * FROM test_insert WHERE id = 5 FOR UPDATE;',
+                        result: 'Empty set (获取间隙锁: (1,10))',
+                        explanation: '事务A在id=5位置获取间隙锁，锁定(1,10)区间。',
+                        lockStatus: { alice: '持有间隙锁(1,10)' }
+                    },
+                    {
+                        title: '🔒 事务B获取另一个间隙锁',
+                        description: '事务B查询另一个不存在的记录。',
+                        sql: '-- 会话B\nBEGIN;\nSELECT * FROM test_insert WHERE id = 8 FOR UPDATE;',
+                        result: 'Empty set (获取间隙锁: (1,10))',
+                        explanation: '事务B也在同一区间获取间隙锁，间隙锁之间兼容。',
+                        lockStatus: { alice: '持有间隙锁(1,10)', bob: '持有间隙锁(1,10)' }
+                    },
+                    {
+                        title: '⚡ 事务A尝试插入',
+                        description: '事务A尝试在间隙中插入数据。',
+                        sql: '-- 会话A\nINSERT INTO test_insert VALUES (5, \'Charlie\');',
+                        result: '等待中... (需要插入意向锁)',
+                        explanation: '事务A需要插入意向锁，但与事务B的间隙锁冲突，开始等待。',
+                        lockStatus: { alice: '等待插入意向锁', bob: '持有间隙锁(1,10)' }
+                    },
+                    {
+                        title: '💥 事务B尝试插入 - 死锁！',
+                        description: '事务B也尝试插入，触发死锁检测。',
+                        sql: '-- 会话B\nINSERT INTO test_insert VALUES (8, \'David\');',
+                        result: 'ERROR 1213: Deadlock found when trying to get lock',
+                        explanation: '死锁检测：A等待B释放间隙锁，B等待A释放间隙锁，形成循环等待！',
+                        lockStatus: { alice: '等待插入意向锁', bob: '死锁回滚' }
+                    },
+                    {
+                        title: '✅ 清理和总结',
+                        description: '清理测试数据，总结插入意向锁死锁。',
+                        sql: '-- 会话A\nCOMMIT;\nDROP TABLE test_insert;',
+                        result: 'Query OK, 0 rows affected',
+                        explanation: '插入意向锁死锁：多个事务持有间隙锁，同时尝试在同一间隙插入时发生。'
+                    }
+                ]
+            },
+            deadlock3: {
+                title: '死锁演示 - 间隙锁冲突',
+                subtitle: '演示间隙锁与记录锁的复杂死锁场景',
+                steps: [
+                    {
+                        title: '🏗️ 准备范围查询环境',
+                        description: '准备用于范围查询的测试数据。',
+                        sql: 'CREATE TABLE test_range (\n  id INT PRIMARY KEY,\n  status VARCHAR(20),\n  INDEX idx_status (status)\n);\nINSERT INTO test_range VALUES \n(1, \'active\'), (5, \'active\'), (10, \'inactive\'), (15, \'active\');',
+                        result: 'Query OK, 4 rows affected',
+                        explanation: '创建带索引的测试表，为间隙锁演示准备数据。'
+                    },
+                    {
+                        title: '🔍 事务A范围查询',
+                        description: '事务A执行范围查询，获取多个间隙锁。',
+                        sql: '-- 会话A\nBEGIN;\nSELECT * FROM test_range WHERE id BETWEEN 3 AND 12 FOR UPDATE;',
+                        result: '2 rows (id=5,10) + 间隙锁',
+                        explanation: '事务A获取记录锁(id=5,10)和间隙锁(1,5)、(5,10)、(10,15)。',
+                        lockStatus: { alice: '持有记录锁+间隙锁' }
+                    },
+                    {
+                        title: '🔍 事务B不同范围查询',
+                        description: '事务B查询不同但重叠的范围。',
+                        sql: '-- 会话B\nBEGIN;\nSELECT * FROM test_range WHERE id BETWEEN 8 AND 18 FOR UPDATE;',
+                        result: '等待中... (间隙锁冲突)',
+                        explanation: '事务B需要的锁与事务A的间隙锁冲突，开始等待。',
+                        lockStatus: { alice: '持有记录锁+间隙锁', bob: '等待间隙锁' }
+                    },
+                    {
+                        title: '🔄 事务A尝试扩展范围',
+                        description: '事务A尝试查询更大范围，需要更多锁。',
+                        sql: '-- 会话A\nSELECT * FROM test_range WHERE id BETWEEN 1 AND 20 FOR UPDATE;',
+                        result: '等待中... (需要更多间隙锁)',
+                        explanation: '事务A需要获取更多间隙锁，但部分区域被事务B申请中。',
+                        lockStatus: { alice: '等待扩展锁范围', bob: '等待间隙锁' }
+                    },
+                    {
+                        title: '💥 死锁检测触发',
+                        description: 'MySQL检测到间隙锁的循环等待。',
+                        sql: '-- 系统自动检测\n-- 死锁检测器运行',
+                        result: 'ERROR 1213: Deadlock found (事务B回滚)',
+                        explanation: '复杂的间隙锁死锁：A持有锁等待B释放，B等待A释放，形成死锁。',
+                        lockStatus: { alice: '持有记录锁+间隙锁', bob: '死锁回滚' }
+                    },
+                    {
+                        title: '✅ 清理和总结',
+                        description: '清理测试环境，总结间隙锁死锁特点。',
+                        sql: '-- 会话A\nCOMMIT;\nDROP TABLE test_range;',
+                        result: 'Query OK, 0 rows affected',
+                        explanation: '间隙锁死锁特点：范围查询重叠、锁粒度细、检测复杂，需要合理设计查询顺序。'
+                    }
+                ]
+            }
+        };
+
+        // 初始化演示
+        function initDemo() {
+            updateStepContent();
+            updateProgress();
+            updateButtons();
+        }
+
+        // 选择场景
+        function selectScenario(scenario) {
+            currentScenario = scenario;
+            currentStep = 1;
+            
+            // 更新场景按钮状态
+            document.querySelectorAll('.scenario-button').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+            
+            // 更新标题
+            const config = scenarios[scenario];
+            document.getElementById('workflow-title').textContent = config.title;
+            document.getElementById('workflow-subtitle').textContent = config.subtitle;
+            
+            // 显示/隐藏隔离级别信息
+            const isolationInfo = document.getElementById('isolation-info');
+            if (scenario === 'isolation') {
+                isolationInfo.style.display = 'block';
+            } else {
+                isolationInfo.style.display = 'none';
+            }
+            
+            // 重置账户余额和锁状态
+            resetAccounts();
+            
+            // 更新显示
+            updateStepContent();
+            updateProgress();
+            updateButtons();
+            updateStepIndicator();
+        }
+
+        // 下一步
+        function nextStep() {
+            if (currentStep < scenarios[currentScenario].steps.length) {
+                currentStep++;
+                updateStepContent();
+                updateProgress();
+                updateButtons();
+                updateStepIndicator();
+                
+                const step = scenarios[currentScenario].steps[currentStep - 1];
+                
+                // 更新账户余额
+                if (step.balanceChange) {
+                    updateAccountBalance(step.balanceChange);
+                }
+                
+                // 更新锁状态
+                if (step.lockInfo) {
+                    updateLockStatus(step.lockInfo);
+                }
+                
+                // 更新隔离级别信息
+                if (currentScenario === 'isolation') {
+                    updateIsolationInfo(step);
+                }
+            }
+        }
+
+        // 上一步
+        function prevStep() {
+            if (currentStep > 1) {
+                currentStep--;
+                updateStepContent();
+                updateProgress();
+                updateButtons();
+                updateStepIndicator();
+                
+                // 恢复账户余额（简化处理）
+                if (currentStep === 1) {
+                    resetAccounts();
+                }
+            }
+        }
+
+        // 重置演示
+        function resetDemo() {
+            currentStep = 1;
+            resetAccounts();
+            updateStepContent();
+            updateProgress();
+            updateButtons();
+            updateStepIndicator();
+        }
+
+        // 更新步骤内容
+        function updateStepContent() {
+            const step = scenarios[currentScenario].steps[currentStep - 1];
+            const content = document.getElementById('step-content');
+            
+            content.innerHTML = `
+                <div class="step-title">
+                    ${step.title}
+                </div>
+                <div class="step-description">
+                    ${step.description}
+                </div>
+                <div class="demo-area">
+                    <div class="sql-windows">
+                        <div class="sql-window">
+                            <div class="window-title">SQL命令</div>
+                            <div class="sql-command">${step.sql}</div>
+                        </div>
+                        <div class="sql-window">
+                            <div class="window-title">执行结果</div>
+                            <div class="sql-result">${step.result}</div>
+                        </div>
+                    </div>
+                    <div class="highlight-box">
+                        <strong>说明：</strong>${step.explanation}
+                    </div>
+                </div>
+            `;
+        }
+
+        // 更新进度条
+        function updateProgress() {
+            const progress = (currentStep / scenarios[currentScenario].steps.length) * 100;
+            document.getElementById('progress-fill').style.width = progress + '%';
+        }
+
+        // 更新按钮状态
+        function updateButtons() {
+            const nextBtn = document.getElementById('next-button');
+            const prevBtn = document.getElementById('prev-button');
+            
+            nextBtn.disabled = currentStep >= scenarios[currentScenario].steps.length;
+            prevBtn.disabled = currentStep <= 1;
+            
+            if (nextBtn.disabled) {
+                nextBtn.textContent = '演示完成';
+            } else {
+                nextBtn.textContent = '下一步';
+            }
+        }
+
+        // 更新步骤指示器
+        function updateStepIndicator() {
+            const totalSteps = scenarios[currentScenario].steps.length;
+            const indicator = document.getElementById('step-indicator');
+            
+            // 清空现有步骤
+            indicator.innerHTML = '';
+            
+            // 创建步骤圆圈
+            for (let i = 1; i <= totalSteps; i++) {
+                const step = document.createElement('div');
+                step.className = 'step';
+                step.textContent = i;
+                step.id = `step-${i}`;
+                
+                if (i < currentStep) {
+                    step.classList.add('completed');
+                } else if (i === currentStep) {
+                    step.classList.add('active');
+                }
+                
+                indicator.appendChild(step);
+            }
+        }
+
+        // 更新账户余额
+        function updateAccountBalance(changes) {
+            if (changes.alice !== undefined) {
+                const aliceBalance = document.getElementById('balance-alice');
+                aliceBalance.textContent = `¥${changes.alice.toLocaleString()}.00`;
+                aliceBalance.classList.add('balance-change');
+                if (changes.alice < 10000) {
+                    aliceBalance.classList.add('balance-decrease');
+                } else {
+                    aliceBalance.classList.add('balance-increase');
+                }
+                setTimeout(() => {
+                    aliceBalance.classList.remove('balance-change', 'balance-decrease', 'balance-increase');
+                }, 1000);
+            }
+            
+            if (changes.bob !== undefined) {
+                const bobBalance = document.getElementById('balance-bob');
+                bobBalance.textContent = `¥${changes.bob.toLocaleString()}.00`;
+                bobBalance.classList.add('balance-change');
+                if (changes.bob > 5000) {
+                    bobBalance.classList.add('balance-increase');
+                } else {
+                    bobBalance.classList.add('balance-decrease');
+                }
+                setTimeout(() => {
+                    bobBalance.classList.remove('balance-change', 'balance-decrease', 'balance-increase');
+                }, 1000);
+            }
+        }
+
+        // 重置账户余额
+        function resetAccounts() {
+            document.getElementById('balance-alice').textContent = '¥10,000.00';
+            document.getElementById('balance-bob').textContent = '¥5,000.00';
+            document.getElementById('status-alice').textContent = '正常';
+            document.getElementById('status-bob').textContent = '正常';
+            
+            // 重置锁状态
+            const lockAlice = document.getElementById('lock-alice');
+            const lockBob = document.getElementById('lock-bob');
+            lockAlice.textContent = '无锁';
+            lockBob.textContent = '无锁';
+            lockAlice.className = 'lock-free';
+            lockBob.className = 'lock-free';
+            
+            // 重置隔离级别信息
+            document.getElementById('session-a-value').textContent = '余额: ¥10,000.00';
+            document.getElementById('session-b-value').textContent = '余额: ¥10,000.00';
+        }
+
+        // 更新锁状态
+        function updateLockStatus(lockInfo) {
+            const lockAlice = document.getElementById('lock-alice');
+            const lockBob = document.getElementById('lock-bob');
+            
+            // 重置锁状态
+            lockAlice.textContent = '无锁';
+            lockBob.textContent = '无锁';
+            lockAlice.className = 'lock-free';
+            lockBob.className = 'lock-free';
+            
+            // 设置锁状态
+            if (lockInfo.alice) {
+                lockAlice.textContent = `事务${lockInfo.alice}持有`;
+                lockAlice.className = 'lock-held';
+            }
+            if (lockInfo.bob) {
+                lockBob.textContent = `事务${lockInfo.bob}持有`;
+                lockBob.className = 'lock-held';
+            }
+            if (lockInfo.waitA) {
+                lockBob.textContent = `事务B持有，A等待`;
+                lockBob.className = 'lock-waiting';
+            }
+        }
+
+        // 更新隔离级别信息
+        function updateIsolationInfo(step) {
+            if (currentStep === 4) { // 事务C修改数据后
+                document.getElementById('session-a-value').textContent = '余额: ¥10,000.00';
+                document.getElementById('session-b-value').textContent = '余额: ¥10,000.00';
+            } else if (currentStep === 5) { // 再次读取对比
+                document.getElementById('session-a-value').textContent = '余额: ¥8,000.00 (读到最新值)';
+                document.getElementById('session-b-value').textContent = '余额: ¥10,000.00 (快照读)';
+            }
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', initDemo);
+    </script>
+</body>
+</html>

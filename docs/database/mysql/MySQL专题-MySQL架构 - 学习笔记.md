@@ -4,10 +4,6 @@
 
 
 
-## 老师：令狐
-
-
-
  
 
 
@@ -90,7 +86,7 @@
 
 <font color='cornflowerblue'>打开文件：</font>
 
-D:\document\mysql 备课\令狐老师的MySQL\流程图\MySQL 简史.png
+MySQL 简史.png
 
 
 
@@ -211,7 +207,7 @@ select * from `INNODB_USER` where user_name = '令狐冲';
 
 **打开Xmind 流程图**：**<font color='red'>SELECT 语句解析树</font>** 
 
-D:\document\mysql 备课\令狐老师的MySQL\流程图\SELECT 语句解析树.xmind
+SELECT 语句解析树.xmind
 
 
 
@@ -631,7 +627,7 @@ SHOW STATUS LIKE '%innodb_buffer_pool%';
 
 **<font color='cornflowerblue'>打开文件：</font>**
 
-D:\document\mysql 备课\令狐老师的MySQL\一条SQL语句是怎么执行的\Double Buffer Write Error.png 
+Double Buffer Write Error.png 
 
 ![Double Buffer Write Error](令狐老师-MySQL专题-MySQL架构 - 副本.assets/Double Buffer Write Error.png)
 
@@ -645,7 +641,7 @@ D:\document\mysql 备课\令狐老师的MySQL\一条SQL语句是怎么执行的\
 
 **<font color='cornflowerblue'>打开文件：</font>**
 
-D:\document\mysql 备课\令狐老师的MySQL\一条SQL语句是怎么执行的\Double Buffer Worker.png
+Double Buffer Worker.png
 
 
 
@@ -849,7 +845,7 @@ https://www.processon.com/view/link/62763a1d0791290711fe5b0d
 
 
 
-<font color='cornflowerblue'>**打开**</font>   D:\document\mysql 备课\令狐老师的mysql\一条SQL语句是怎么执行的\redo log 三层架构.png
+<font color='cornflowerblue'>**打开**</font>   redo log 三层架构.png
 
 ![redo log 刷盘](令狐老师-MySQL专题-MySQL架构 - 副本.assets/redo log 刷盘-16519148853841.png)
 
@@ -903,7 +899,7 @@ A-3：有优点，必有缺点。这个副作用，就是可能丢失数据：
 
   
 
-  **<font color='cornflowerblue'>打开文件</font>**   D:\document\mysql 备课\令狐老师的mysql\一条SQL语句是怎么执行的\redo log 刷盘.png
+  **<font color='cornflowerblue'>打开文件</font>**   redo log 刷盘.png
 
   
 
@@ -1055,4 +1051,4 @@ MySQL索引优化、分析
 
 
 
-表述，过渡~ ~ ~ 
+表述，过渡~ ~ ~
