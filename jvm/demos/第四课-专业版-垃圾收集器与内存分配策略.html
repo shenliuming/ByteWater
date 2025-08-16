@@ -1,0 +1,1555 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第四课：垃圾收集器与内存分配策略 - 交互式演示</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --warning-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            --danger-gradient: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            --dark-color: #2d3748;
+            --light-color: #ffffff;
+            --text-secondary: #718096;
+            --border-color: #e2e8f0;
+            --shadow-light: 0 4px 6px rgba(0, 0, 0, 0.05);
+            --shadow-medium: 0 10px 25px rgba(0, 0, 0, 0.1);
+            --shadow-heavy: 0 20px 40px rgba(0, 0, 0, 0.15);
+            --border-radius: 12px;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--primary-gradient);
+            min-height: 100vh;
+            color: var(--dark-color);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+            color: var(--light-color);
+        }
+
+        .header h1 {
+            font-size: clamp(2rem, 5vw, 3rem);
+            font-weight: 700;
+            margin-bottom: 1rem;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            letter-spacing: -0.02em;
+        }
+
+        .header p {
+            font-size: 1.25rem;
+            opacity: 0.9;
+            max-width: 600px;
+            margin: 0 auto;
+            font-weight: 300;
+        }
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .demo-card {
+            background: var(--light-color);
+            border-radius: var(--border-radius);
+            padding: 2rem;
+            box-shadow: var(--shadow-medium);
+            transition: var(--transition);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .demo-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--primary-gradient);
+        }
+
+        .demo-card:hover {
+            transform: translateY(-8px);
+            box-shadow: var(--shadow-heavy);
+        }
+
+        .demo-card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .demo-card-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: var(--primary-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+            margin-right: 1rem;
+        }
+
+        .demo-card h3 {
+            color: var(--dark-color);
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .demo-card p {
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            font-size: 1rem;
+        }
+
+        .demo-preview {
+            width: 100%;
+            height: 200px;
+            border: 2px solid var(--border-color);
+            border-radius: var(--border-radius);
+            margin-bottom: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            background: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .demo-preview-placeholder {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            text-align: center;
+        }
+
+        .start-demo-btn {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: var(--transition);
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .start-demo-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 2% auto;
+            padding: 0;
+            border-radius: var(--border-radius);
+            width: 95%;
+            height: 90%;
+            position: relative;
+            overflow: hidden;
+            box-shadow: var(--shadow-heavy);
+        }
+
+        .modal-header {
+            background: var(--primary-gradient);
+            color: white;
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .close {
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: var(--transition);
+            padding: 0.5rem;
+            border-radius: 50%;
+        }
+
+        .close:hover {
+            background-color: rgba(255,255,255,0.1);
+        }
+
+        .modal-body {
+            padding: 2rem;
+            height: calc(100% - 80px);
+            overflow-y: auto;
+        }
+
+        .demo-section {
+            margin-bottom: 3rem;
+            padding: 2rem;
+            background: #f8fafc;
+            border-radius: var(--border-radius);
+            border-left: 4px solid #667eea;
+        }
+
+        .demo-section h3 {
+            color: var(--dark-color);
+            margin-bottom: 1rem;
+            font-size: 1.3rem;
+        }
+
+        .code-block {
+            background: #1a202c;
+            color: #e2e8f0;
+            padding: 1.5rem;
+            border-radius: var(--border-radius);
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+
+        .collector-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+
+        .collector-card {
+            background: white;
+            border-radius: var(--border-radius);
+            padding: 1.5rem;
+            box-shadow: var(--shadow-light);
+            border-top: 4px solid #667eea;
+            transition: var(--transition);
+        }
+
+        .collector-card:hover {
+            transform: translateY(-4px);
+            box-shadow: var(--shadow-medium);
+        }
+
+        .collector-card h4 {
+            color: var(--dark-color);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .collector-card ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .collector-card li {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .collector-card li:last-child {
+            border-bottom: none;
+        }
+
+        .collector-card li::before {
+            content: '▸';
+            color: #667eea;
+            margin-right: 0.5rem;
+        }
+
+        .gc-algorithm {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+
+        .algorithm-step {
+            display: flex;
+            align-items: center;
+            padding: 1.5rem;
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow-light);
+            transition: var(--transition);
+            border-left: 4px solid #4facfe;
+        }
+
+        .algorithm-step:hover {
+            transform: translateX(8px);
+            box-shadow: var(--shadow-medium);
+        }
+
+        .algorithm-step-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            background: var(--success-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            margin-right: 1.5rem;
+            font-size: 1.5rem;
+        }
+
+        .algorithm-step-content h4 {
+            color: var(--dark-color);
+            margin-bottom: 0.5rem;
+            font-size: 1.2rem;
+        }
+
+        .algorithm-step-content p {
+            color: var(--text-secondary);
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        .performance-comparison {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+
+        .performance-card {
+            background: white;
+            border-radius: var(--border-radius);
+            padding: 1.5rem;
+            box-shadow: var(--shadow-light);
+            text-align: center;
+        }
+
+        .performance-card.serial {
+            border-top: 4px solid #48bb78;
+        }
+
+        .performance-card.parallel {
+            border-top: 4px solid #ed8936;
+        }
+
+        .performance-card.cms {
+            border-top: 4px solid #805ad5;
+        }
+
+        .performance-card.g1 {
+            border-top: 4px solid #e53e3e;
+        }
+
+        .performance-metric {
+            margin: 1rem 0;
+        }
+
+        .performance-metric h5 {
+            color: var(--dark-color);
+            margin-bottom: 0.5rem;
+        }
+
+        .performance-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .performance-fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .performance-fill.high {
+            background: #48bb78;
+        }
+
+        .performance-fill.medium {
+            background: #ed8936;
+        }
+
+        .performance-fill.low {
+            background: #e53e3e;
+        }
+
+        .allocation-strategy {
+            background: white;
+            border-radius: var(--border-radius);
+            padding: 2rem;
+            margin: 2rem 0;
+            box-shadow: var(--shadow-light);
+        }
+
+        .strategy-flow {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin: 1rem 0;
+        }
+
+        .strategy-step {
+            display: flex;
+            align-items: center;
+            padding: 1rem;
+            background: #f8fafc;
+            border-radius: var(--border-radius);
+            border-left: 4px solid #667eea;
+        }
+
+        .strategy-step-number {
+            width: 30px;
+            height: 30px;
+            border-radius: 50%;
+            background: var(--primary-gradient);
+            color: white;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: bold;
+            margin-right: 1rem;
+        }
+
+        .strategy-step-text {
+            flex: 1;
+            color: var(--dark-color);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .demo-grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+            
+            .modal-content {
+                width: 98%;
+                height: 95%;
+                margin: 1% auto;
+            }
+            
+            .collector-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .performance-comparison {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-recycle"></i> 第四课：垃圾收集器与内存分配策略</h1>
+            <p>深入理解各种垃圾收集器的工作原理与内存分配策略</p>
+        </div>
+
+        <div class="demo-grid">
+            <div class="demo-card" onclick="openDemo('gc-algorithms')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-cogs"></i>
+                    </div>
+                    <h3>垃圾收集算法</h3>
+                </div>
+                <p>了解标记-清除、复制、标记-整理等基础垃圾收集算法的原理</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-project-diagram" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击了解算法</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-cogs"></i>
+                    了解算法
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('collectors-overview')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-layer-group"></i>
+                    </div>
+                    <h3>收集器总览</h3>
+                </div>
+                <p>全面了解Serial、Parallel、CMS、G1、ZGC等垃圾收集器的特点</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-sitemap" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击查看收集器</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-layer-group"></i>
+                    查看收集器
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('performance-comparison')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-chart-bar"></i>
+                    </div>
+                    <h3>性能对比</h3>
+                </div>
+                <p>对比不同垃圾收集器在吞吐量、延迟、内存占用等方面的表现</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-chart-line" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击查看对比</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-chart-bar"></i>
+                    查看对比
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('allocation-strategy')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-memory"></i>
+                    </div>
+                    <h3>内存分配策略</h3>
+                </div>
+                <p>理解对象优先在Eden分配、大对象直接进入老年代等分配策略</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-route" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击了解策略</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-memory"></i>
+                    了解策略
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('gc-tuning')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-sliders-h"></i>
+                    </div>
+                    <h3>GC调优实践</h3>
+                </div>
+                <p>掌握垃圾收集器的选择原则和调优参数配置技巧</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-tools" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击学习调优</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-sliders-h"></i>
+                    学习调优
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('gc-monitoring')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-chart-area"></i>
+                    </div>
+                    <h3>GC监控分析</h3>
+                </div>
+                <p>学习如何监控和分析垃圾收集的性能指标和日志信息</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-analytics" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击学习监控</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-chart-area"></i>
+                    学习监控
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框 -->
+    <div id="demoModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">演示标题</h2>
+                <span class="close" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </span>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- 动态内容将在这里加载 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openDemo(demoType) {
+            const modal = document.getElementById('demoModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            
+            let title = '';
+            let content = '';
+            
+            switch(demoType) {
+                case 'gc-algorithms':
+                    title = '垃圾收集算法详解';
+                    content = getGCAlgorithmsDemo();
+                    break;
+                case 'collectors-overview':
+                    title = '垃圾收集器总览';
+                    content = getCollectorsOverviewDemo();
+                    break;
+                case 'performance-comparison':
+                    title = '收集器性能对比';
+                    content = getPerformanceComparisonDemo();
+                    break;
+                case 'allocation-strategy':
+                    title = '内存分配策略';
+                    content = getAllocationStrategyDemo();
+                    break;
+                case 'gc-tuning':
+                    title = 'GC调优实践';
+                    content = getGCTuningDemo();
+                    break;
+                case 'gc-monitoring':
+                    title = 'GC监控分析';
+                    content = getGCMonitoringDemo();
+                    break;
+            }
+            
+            modalTitle.textContent = title;
+            modalBody.innerHTML = content;
+            modal.style.display = 'block';
+        }
+        
+        function closeModal() {
+            document.getElementById('demoModal').style.display = 'none';
+        }
+        
+        function getGCAlgorithmsDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-cogs"></i> 基础垃圾收集算法</h3>
+                    <div class="gc-algorithm">
+                        <div class="algorithm-step">
+                            <div class="algorithm-step-icon">
+                                <i class="fas fa-search"></i>
+                            </div>
+                            <div class="algorithm-step-content">
+                                <h4>标记-清除算法（Mark-Sweep）</h4>
+                                <p>首先标记出所有需要回收的对象，然后统一回收所有被标记的对象。会产生内存碎片。</p>
+                            </div>
+                        </div>
+                        <div class="algorithm-step">
+                            <div class="algorithm-step-icon">
+                                <i class="fas fa-copy"></i>
+                            </div>
+                            <div class="algorithm-step-content">
+                                <h4>复制算法（Copying）</h4>
+                                <p>将内存分为两块，每次只使用其中一块。当这一块用完了，就将还存活的对象复制到另一块上。</p>
+                            </div>
+                        </div>
+                        <div class="algorithm-step">
+                            <div class="algorithm-step-icon">
+                                <i class="fas fa-compress-arrows-alt"></i>
+                            </div>
+                            <div class="algorithm-step-content">
+                                <h4>标记-整理算法（Mark-Compact）</h4>
+                                <p>标记过程与标记-清除算法一样，但后续步骤不是直接清理，而是让所有存活对象向一端移动。</p>
+                            </div>
+                        </div>
+                        <div class="algorithm-step">
+                            <div class="algorithm-step-icon">
+                                <i class="fas fa-layer-group"></i>
+                            </div>
+                            <div class="algorithm-step-content">
+                                <h4>分代收集算法（Generational Collection）</h4>
+                                <p>根据对象存活周期的不同将内存划分为几块，一般是新生代和老年代，然后根据各个年代的特点采用最适当的收集算法。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-code"></i> 算法实现原理</h3>
+                    <div class="code-block">
+// 标记-清除算法伪代码
+function markSweepGC() {
+    // 标记阶段：从根对象开始标记所有可达对象
+    markPhase();
+    
+    // 清除阶段：回收所有未标记的对象
+    sweepPhase();
+}
+
+function markPhase() {
+    // 从GC Roots开始遍历对象图
+    for (Object root : gcRoots) {
+        mark(root);
+    }
+}
+
+function mark(Object obj) {
+    if (obj != null && !obj.isMarked()) {
+        obj.setMarked(true);
+        // 递归标记所有引用的对象
+        for (Object ref : obj.getReferences()) {
+            mark(ref);
+        }
+    }
+}
+
+function sweepPhase() {
+    // 遍历堆中所有对象，回收未标记的对象
+    for (Object obj : heap) {
+        if (!obj.isMarked()) {
+            free(obj);  // 释放内存
+        } else {
+            obj.setMarked(false);  // 清除标记，为下次GC准备
+        }
+    }
+}
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-balance-scale"></i> 算法优缺点对比</h3>
+                    <div class="collector-grid">
+                        <div class="collector-card">
+                            <h4><i class="fas fa-search"></i> 标记-清除</h4>
+                            <ul>
+                                <li><strong>优点：</strong>实现简单，不需要移动对象</li>
+                                <li><strong>缺点：</strong>产生内存碎片，效率不高</li>
+                                <li><strong>适用：</strong>老年代收集</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-copy"></i> 复制算法</h4>
+                            <ul>
+                                <li><strong>优点：</strong>效率高，无内存碎片</li>
+                                <li><strong>缺点：</strong>内存利用率低（50%）</li>
+                                <li><strong>适用：</strong>新生代收集</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-compress-arrows-alt"></i> 标记-整理</h4>
+                            <ul>
+                                <li><strong>优点：</strong>无内存碎片，内存利用率高</li>
+                                <li><strong>缺点：</strong>需要移动对象，效率较低</li>
+                                <li><strong>适用：</strong>老年代收集</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-layer-group"></i> 分代收集</h4>
+                            <ul>
+                                <li><strong>优点：</strong>针对性强，效率高</li>
+                                <li><strong>缺点：</strong>实现复杂</li>
+                                <li><strong>适用：</strong>现代JVM的主流方案</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getCollectorsOverviewDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-layer-group"></i> 垃圾收集器分类</h3>
+                    <div class="collector-grid">
+                        <div class="collector-card">
+                            <h4><i class="fas fa-user"></i> Serial收集器</h4>
+                            <ul>
+                                <li>单线程收集器</li>
+                                <li>收集时必须暂停所有工作线程</li>
+                                <li>简单高效，适合单CPU环境</li>
+                                <li>Client模式下的默认新生代收集器</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-users"></i> Parallel收集器</h4>
+                            <ul>
+                                <li>多线程并行收集器</li>
+                                <li>关注吞吐量优先</li>
+                                <li>适合后台运算而不需要太多交互的任务</li>
+                                <li>Server模式下的默认收集器</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-sync"></i> CMS收集器</h4>
+                            <ul>
+                                <li>并发标记清除收集器</li>
+                                <li>关注最短回收停顿时间</li>
+                                <li>适合互联网站或B/S系统的服务端</li>
+                                <li>会产生内存碎片</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-globe"></i> G1收集器</h4>
+                            <ul>
+                                <li>面向服务端应用的垃圾收集器</li>
+                                <li>低延迟、可预测的停顿时间</li>
+                                <li>整堆收集器，不区分新生代老年代</li>
+                                <li>JDK 9及以后的默认收集器</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-rocket"></i> ZGC收集器</h4>
+                            <ul>
+                                <li>低延迟垃圾收集器</li>
+                                <li>停顿时间不超过10ms</li>
+                                <li>支持TB级别的堆大小</li>
+                                <li>JDK 11引入的实验性收集器</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-flash"></i> Shenandoah收集器</h4>
+                            <ul>
+                                <li>低延迟垃圾收集器</li>
+                                <li>与应用程序并发执行</li>
+                                <li>停顿时间与堆大小无关</li>
+                                <li>OpenJDK特有的收集器</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-sitemap"></i> 收集器组合关系</h3>
+                    <div class="code-block">
+# 经典收集器组合
+新生代收集器     老年代收集器
+┌─────────────┬─────────────────┐
+│   Serial    │   Serial Old    │  单线程组合
+├─────────────┼─────────────────┤
+│   ParNew    │      CMS        │  低延迟组合
+├─────────────┼─────────────────┤
+│  Parallel   │  Parallel Old   │  高吞吐量组合
+└─────────────┴─────────────────┘
+
+# 现代收集器
+┌─────────────────────────────────┐
+│              G1                 │  整堆收集器
+├─────────────────────────────────┤
+│             ZGC                 │  超低延迟收集器
+├─────────────────────────────────┤
+│         Shenandoah              │  低延迟收集器
+└─────────────────────────────────┘
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-cogs"></i> 收集器选择参数</h3>
+                    <div class="code-block">
+# Serial收集器
+-XX:+UseSerialGC
+
+# Parallel收集器（默认）
+-XX:+UseParallelGC
+-XX:+UseParallelOldGC
+
+# CMS收集器
+-XX:+UseConcMarkSweepGC
+-XX:+UseParNewGC
+
+# G1收集器
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=200
+-XX:G1HeapRegionSize=16m
+
+# ZGC收集器（JDK 11+）
+-XX:+UnlockExperimentalVMOptions
+-XX:+UseZGC
+
+# Shenandoah收集器
+-XX:+UnlockExperimentalVMOptions
+-XX:+UseShenandoahGC
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getPerformanceComparisonDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-chart-bar"></i> 收集器性能对比</h3>
+                    <div class="performance-comparison">
+                        <div class="performance-card serial">
+                            <h4><i class="fas fa-user"></i> Serial GC</h4>
+                            <div class="performance-metric">
+                                <h5>吞吐量</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill medium" style="width: 60%;"></div>
+                                </div>
+                                <small>60% - 适合小型应用</small>
+                            </div>
+                            <div class="performance-metric">
+                                <h5>延迟</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill low" style="width: 30%;"></div>
+                                </div>
+                                <small>较高 - 单线程收集</small>
+                            </div>
+                            <div class="performance-metric">
+                                <h5>内存占用</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill high" style="width: 90%;"></div>
+                                </div>
+                                <small>最低 - 无额外线程开销</small>
+                            </div>
+                        </div>
+                        
+                        <div class="performance-card parallel">
+                            <h4><i class="fas fa-users"></i> Parallel GC</h4>
+                            <div class="performance-metric">
+                                <h5>吞吐量</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill high" style="width: 95%;"></div>
+                                </div>
+                                <small>95% - 吞吐量优先</small>
+                            </div>
+                            <div class="performance-metric">
+                                <h5>延迟</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill medium" style="width: 50%;"></div>
+                                </div>
+                                <small>中等 - 并行收集</small>
+                            </div>
+                            <div class="performance-metric">
+                                <h5>内存占用</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill medium" style="width: 70%;"></div>
+                                </div>
+                                <small>中等 - 多线程开销</small>
+                            </div>
+                        </div>
+                        
+                        <div class="performance-card cms">
+                            <h4><i class="fas fa-sync"></i> CMS GC</h4>
+                            <div class="performance-metric">
+                                <h5>吞吐量</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill medium" style="width: 75%;"></div>
+                                </div>
+                                <small>75% - 并发收集影响</small>
+                            </div>
+                            <div class="performance-metric">
+                                <h5>延迟</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill high" style="width: 85%;"></div>
+                                </div>
+                                <small>低 - 并发标记清除</small>
+                            </div>
+                            <div class="performance-metric">
+                                <h5>内存占用</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill low" style="width: 40%;"></div>
+                                </div>
+                                <small>较高 - 内存碎片</small>
+                            </div>
+                        </div>
+                        
+                        <div class="performance-card g1">
+                            <h4><i class="fas fa-globe"></i> G1 GC</h4>
+                            <div class="performance-metric">
+                                <h5>吞吐量</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill high" style="width: 85%;"></div>
+                                </div>
+                                <small>85% - 平衡性能</small>
+                            </div>
+                            <div class="performance-metric">
+                                <h5>延迟</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill high" style="width: 90%;"></div>
+                                </div>
+                                <small>可预测 - 目标停顿时间</small>
+                            </div>
+                            <div class="performance-metric">
+                                <h5>内存占用</h5>
+                                <div class="performance-bar">
+                                    <div class="performance-fill medium" style="width: 65%;"></div>
+                                </div>
+                                <small>中等 - 额外元数据</small>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-chart-line"></i> 性能测试数据</h3>
+                    <div class="code-block">
+# 测试环境：8核16GB，堆大小4GB
+# 测试负载：高并发Web应用
+
+收集器        吞吐量    平均延迟    99%延迟    内存占用
+─────────────────────────────────────────────────
+Serial GC     60%       50ms       200ms      最低
+Parallel GC   95%       30ms       150ms      中等
+CMS GC        75%       15ms       80ms       较高
+G1 GC         85%       10ms       50ms       中等
+ZGC           80%       2ms        10ms       较高
+
+# 适用场景建议
+• Serial GC    - 单核或小内存环境
+• Parallel GC  - 批处理、科学计算
+• CMS GC       - 互联网应用（已废弃）
+• G1 GC        - 大内存、低延迟要求
+• ZGC          - 超大内存、极低延迟
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-lightbulb"></i> 收集器选择建议</h3>
+                    <div class="collector-grid">
+                        <div class="collector-card">
+                            <h4><i class="fas fa-desktop"></i> 桌面应用</h4>
+                            <ul>
+                                <li>内存较小（<100MB）</li>
+                                <li>用户交互要求不高</li>
+                                <li>推荐：Serial GC</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-server"></i> 服务端应用</h4>
+                            <ul>
+                                <li>多核CPU，大内存</li>
+                                <li>吞吐量优先</li>
+                                <li>推荐：Parallel GC</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-globe-americas"></i> 互联网应用</h4>
+                            <ul>
+                                <li>响应时间敏感</li>
+                                <li>用户体验要求高</li>
+                                <li>推荐：G1 GC</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-rocket"></i> 大数据应用</h4>
+                            <ul>
+                                <li>超大内存（>32GB）</li>
+                                <li>极低延迟要求</li>
+                                <li>推荐：ZGC/Shenandoah</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getAllocationStrategyDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-memory"></i> 对象内存分配策略</h3>
+                    <div class="allocation-strategy">
+                        <h4>对象分配的基本流程</h4>
+                        <div class="strategy-flow">
+                            <div class="strategy-step">
+                                <div class="strategy-step-number">1</div>
+                                <div class="strategy-step-text">
+                                    <strong>优先在Eden区分配</strong><br>
+                                    新创建的对象优先在新生代的Eden区分配，当Eden区没有足够空间时，虚拟机将发起一次Minor GC。
+                                </div>
+                            </div>
+                            <div class="strategy-step">
+                                <div class="strategy-step-number">2</div>
+                                <div class="strategy-step-text">
+                                    <strong>大对象直接进入老年代</strong><br>
+                                    大对象是指需要大量连续内存空间的Java对象，如很长的字符串及数组。
+                                </div>
+                            </div>
+                            <div class="strategy-step">
+                                <div class="strategy-step-number">3</div>
+                                <div class="strategy-step-text">
+                                    <strong>长期存活的对象将进入老年代</strong><br>
+                                    虚拟机给每个对象定义了一个对象年龄计数器，经历过一次Minor GC后年龄就增加1岁。
+                                </div>
+                            </div>
+                            <div class="strategy-step">
+                                <div class="strategy-step-number">4</div>
+                                <div class="strategy-step-text">
+                                    <strong>动态对象年龄判定</strong><br>
+                                    如果在Survivor空间中相同年龄所有对象大小的总和大于Survivor空间的一半，年龄大于或等于该年龄的对象就可以直接进入老年代。
+                                </div>
+                            </div>
+                            <div class="strategy-step">
+                                <div class="strategy-step-number">5</div>
+                                <div class="strategy-step-text">
+                                    <strong>空间分配担保</strong><br>
+                                    在发生Minor GC之前，虚拟机会先检查老年代最大可用的连续空间是否大于新生代所有对象总空间。
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-code"></i> 分配策略示例</h3>
+                    <div class="code-block">
+// 示例1：对象优先在Eden分配
+public class AllocationDemo {
+    private static final int _1MB = 1024 * 1024;
+    
+    public static void testAllocation() {
+        byte[] allocation1, allocation2, allocation3, allocation4;
+        allocation1 = new byte[2 * _1MB];  // 2MB对象，分配在Eden
+        allocation2 = new byte[2 * _1MB];  // 2MB对象，分配在Eden
+        allocation3 = new byte[2 * _1MB];  // 2MB对象，分配在Eden
+        allocation4 = new byte[4 * _1MB];  // 4MB对象，Eden不足，触发Minor GC
+        // allocation1、2、3进入Survivor或老年代
+        // allocation4分配在Eden
+    }
+}
+
+// 示例2：大对象直接进入老年代
+public class BigObjectDemo {
+    public static void testBigObject() {
+        // 设置-XX:PretenureSizeThreshold=3145728 (3MB)
+        byte[] allocation = new byte[4 * _1MB];  // 4MB > 3MB，直接进入老年代
+    }
+}
+
+// 示例3：长期存活对象进入老年代
+public class TenuringThresholdDemo {
+    public static void testTenuringThreshold() {
+        // 设置-XX:MaxTenuringThreshold=1
+        byte[] allocation1 = new byte[_1MB / 4];
+        byte[] allocation2 = new byte[4 * _1MB];
+        byte[] allocation3 = new byte[4 * _1MB];
+        allocation3 = null;
+        allocation3 = new byte[4 * _1MB];
+        // allocation1经过两次GC后进入老年代
+    }
+}
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-sliders-h"></i> 分配相关参数</h3>
+                    <div class="code-block">
+# 新生代大小设置
+-Xmn256m                              # 直接设置新生代大小
+-XX:NewRatio=2                        # 设置老年代与新生代的比例
+-XX:SurvivorRatio=8                   # 设置Eden与Survivor的比例
+
+# 对象分配参数
+-XX:PretenureSizeThreshold=1048576    # 大对象阈值（字节）
+-XX:MaxTenuringThreshold=15           # 对象晋升老年代的年龄阈值
+-XX:TargetSurvivorRatio=50            # Survivor区的目标使用率
+
+# 分配担保参数
+-XX:+HandlePromotionFailure           # 是否允许分配担保失败
+-XX:+PrintGCDetails                   # 打印GC详细信息
+-XX:+PrintTenuringDistribution        # 打印对象年龄分布
+
+# TLAB（线程本地分配缓冲）
+-XX:+UseTLAB                          # 启用TLAB（默认开启）
+-XX:TLABSize=256k                     # TLAB大小
+-XX:+ResizeTLAB                       # 动态调整TLAB大小
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-chart-line"></i> 分配性能优化</h3>
+                    <div class="collector-grid">
+                        <div class="collector-card">
+                            <h4><i class="fas fa-tachometer-alt"></i> TLAB优化</h4>
+                            <ul>
+                                <li>线程本地分配缓冲区</li>
+                                <li>避免多线程竞争</li>
+                                <li>提高小对象分配效率</li>
+                                <li>减少同步开销</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-layer-group"></i> 分代假说</h4>
+                            <ul>
+                                <li>弱分代假说：大部分对象都是朝生夕灭</li>
+                                <li>强分代假说：熬过越多次GC的对象越难消亡</li>
+                                <li>跨代引用假说：跨代引用相对于同代引用来说仅占极少数</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-memory"></i> 内存分配策略</h4>
+                            <ul>
+                                <li>栈上分配：逃逸分析优化</li>
+                                <li>TLAB分配：线程本地缓冲</li>
+                                <li>Eden区分配：新对象的首选</li>
+                                <li>老年代分配：大对象和长期存活对象</li>
+                            </ul>
+                        </div>
+                        <div class="collector-card">
+                            <h4><i class="fas fa-chart-bar"></i> 分配监控</h4>
+                            <ul>
+                                <li>监控Eden区使用率</li>
+                                <li>观察对象晋升速率</li>
+                                <li>分析GC频率和耗时</li>
+                                <li>调整分配参数</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getGCTuningDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-sliders-h"></i> GC调优基本原则</h3>
+                    <div class="gc-algorithm">
+                        <div class="algorithm-step">
+                            <div class="algorithm-step-icon">
+                                <i class="fas fa-target"></i>
+                            </div>
+                            <div class="algorithm-step-content">
+                                <h4>明确调优目标</h4>
+                                <p>确定是优化吞吐量、延迟还是内存占用。不同目标需要不同的调优策略。</p>
+                            </div>
+                        </div>
+                        <div class="algorithm-step">
+                            <div class="algorithm-step-icon">
+                                <i class="fas fa-chart-line"></i>
+                            </div>
+                            <div class="algorithm-step-content">
+                                <h4>建立性能基线</h4>
+                                <p>在调优前记录当前的GC性能指标，包括GC频率、停顿时间、吞吐量等。</p>
+                            </div>
+                        </div>
+                        <div class="algorithm-step">
+                            <div class="algorithm-step-icon">
+                                <i class="fas fa-cogs"></i>
+                            </div>
+                            <div class="algorithm-step-content">
+                                <h4>选择合适的收集器</h4>
+                                <p>根据应用特点和性能要求选择最适合的垃圾收集器。</p>
+                            </div>
+                        </div>
+                        <div class="algorithm-step">
+                            <div class="algorithm-step-icon">
+                                <i class="fas fa-balance-scale"></i>
+                            </div>
+                            <div class="algorithm-step-content">
+                                <h4>调整堆大小和比例</h4>
+                                <p>合理设置堆大小、新生代老年代比例，避免频繁GC或长时间停顿。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-tools"></i> 常用调优参数</h3>
+                    <div class="code-block">
+# 堆内存设置
+-Xms4g -Xmx4g                         # 设置堆初始和最大大小相等
+-Xmn1g                                # 设置新生代大小
+-XX:NewRatio=3                        # 老年代:新生代 = 3:1
+-XX:SurvivorRatio=8                   # Eden:Survivor = 8:1
+
+# G1收集器调优
+-XX:+UseG1GC                          # 启用G1收集器
+-XX:MaxGCPauseMillis=200              # 设置最大停顿时间目标
+-XX:G1HeapRegionSize=16m              # 设置Region大小
+-XX:G1NewSizePercent=20               # 新生代最小比例
+-XX:G1MaxNewSizePercent=40            # 新生代最大比例
+-XX:G1MixedGCCountTarget=8            # 混合GC次数目标
+-XX:G1HeapWastePercent=5              # 堆废物百分比
+
+# Parallel收集器调优
+-XX:+UseParallelGC                    # 启用Parallel收集器
+-XX:ParallelGCThreads=8               # 并行GC线程数
+-XX:MaxGCPauseMillis=100              # 最大停顿时间
+-XX:GCTimeRatio=99                    # GC时间比例（1/(1+99)=1%）
+-XX:+UseAdaptiveSizePolicy            # 自适应大小策略
+
+# CMS收集器调优（已废弃）
+-XX:+UseConcMarkSweepGC               # 启用CMS收集器
+-XX:CMSInitiatingOccupancyFraction=70 # CMS触发阈值
+-XX:+UseCMSInitiatingOccupancyOnly    # 只使用设定的触发阈值
+-XX:+CMSParallelRemarkEnabled         # 并行重新标记
+-XX:+CMSScavengeBeforeRemark          # 重新标记前清理新生代
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-chart-area"></i> 调优实践案例</h3>
+                    <div class="collector-grid">
+                        <div class="collector-card">
+                             <h4><i class="fas fa-globe"></i> 电商网站优化</h4>
+                             <ul>
+                                 <li><strong>问题：</strong>高峰期响应时间过长</li>
+                                 <li><strong>方案：</strong>使用G1收集器，设置200ms停顿目标</li>
+                                 <li><strong>效果：</strong>99%请求延迟降低60%</li>
+                                 <li><strong>参数：</strong>-XX:+UseG1GC -XX:MaxGCPauseMillis=200</li>
+                             </ul>
+                         </div>
+                         <div class="collector-card">
+                             <h4><i class="fas fa-chart-line"></i> 大数据处理优化</h4>
+                             <ul>
+                                 <li><strong>问题：</strong>批处理任务GC开销过大</li>
+                                 <li><strong>方案：</strong>使用Parallel收集器，优化堆大小</li>
+                                 <li><strong>效果：</strong>吞吐量提升40%</li>
+                                 <li><strong>参数：</strong>-XX:+UseParallelGC -Xmx32g</li>
+                             </ul>
+                         </div>
+                         <div class="collector-card">
+                             <h4><i class="fas fa-mobile-alt"></i> 移动端应用优化</h4>
+                             <ul>
+                                 <li><strong>问题：</strong>内存受限，频繁GC</li>
+                                 <li><strong>方案：</strong>使用Serial收集器，减少内存占用</li>
+                                 <li><strong>效果：</strong>内存占用降低30%</li>
+                                 <li><strong>参数：</strong>-XX:+UseSerialGC -Xmx512m</li>
+                             </ul>
+                         </div>
+                         <div class="collector-card">
+                             <h4><i class="fas fa-gamepad"></i> 游戏服务器优化</h4>
+                             <ul>
+                                 <li><strong>问题：</strong>GC停顿影响游戏体验</li>
+                                 <li><strong>方案：</strong>使用ZGC，实现超低延迟</li>
+                                 <li><strong>效果：</strong>GC停顿时间<10ms</li>
+                                 <li><strong>参数：</strong>-XX:+UseZGC -Xmx16g</li>
+                             </ul>
+                         </div>
+                     </div>
+                 </div>
+                 
+                 <div class="demo-section">
+                     <h3><i class="fas fa-wrench"></i> 调优工具和方法</h3>
+                     <div class="code-block">
+# GC日志分析
+-XX:+PrintGC                          # 打印GC信息
+-XX:+PrintGCDetails                   # 打印GC详细信息
+-XX:+PrintGCTimeStamps                # 打印GC时间戳
+-XX:+PrintGCApplicationStoppedTime    # 打印应用停顿时间
+-Xloggc:gc.log                        # GC日志输出到文件
+
+# 内存分析工具
+-XX:+HeapDumpOnOutOfMemoryError       # OOM时生成堆转储
+-XX:HeapDumpPath=/path/to/dumps/      # 堆转储文件路径
+-XX:+PrintStringDeduplicationStatistics # 字符串去重统计
+
+# 性能监控参数
+-XX:+FlightRecorder                   # 启用JFR
+-XX:StartFlightRecording=duration=60s # 启动60秒记录
+-XX:+UnlockCommercialFeatures         # 解锁商业特性（JDK 8）
+                     </div>
+                 </div>
+             `;
+         }
+         
+         function getGCMonitoringDemo() {
+             return `
+                 <div class="demo-section">
+                     <h3><i class="fas fa-chart-area"></i> GC监控指标</h3>
+                     <div class="collector-grid">
+                         <div class="collector-card">
+                             <h4><i class="fas fa-clock"></i> 时间指标</h4>
+                             <ul>
+                                 <li><strong>GC频率：</strong>单位时间内GC次数</li>
+                                 <li><strong>停顿时间：</strong>每次GC的暂停时长</li>
+                                 <li><strong>总GC时间：</strong>累计GC消耗时间</li>
+                                 <li><strong>应用运行时间：</strong>非GC时间占比</li>
+                             </ul>
+                         </div>
+                         <div class="collector-card">
+                             <h4><i class="fas fa-memory"></i> 内存指标</h4>
+                             <ul>
+                                 <li><strong>堆使用率：</strong>已使用堆内存比例</li>
+                                 <li><strong>晋升速率：</strong>对象从新生代到老年代的速度</li>
+                                 <li><strong>分配速率：</strong>新对象创建速度</li>
+                                 <li><strong>内存泄漏：</strong>无法回收的内存增长</li>
+                             </ul>
+                         </div>
+                         <div class="collector-card">
+                             <h4><i class="fas fa-tachometer-alt"></i> 吞吐量指标</h4>
+                             <ul>
+                                 <li><strong>应用吞吐量：</strong>应用执行时间占比</li>
+                                 <li><strong>GC吞吐量：</strong>GC处理的内存量</li>
+                                 <li><strong>并发度：</strong>并发GC的效率</li>
+                                 <li><strong>CPU使用率：</strong>GC对CPU的占用</li>
+                             </ul>
+                         </div>
+                         <div class="collector-card">
+                             <h4><i class="fas fa-exclamation-triangle"></i> 异常指标</h4>
+                             <ul>
+                                 <li><strong>OOM错误：</strong>内存溢出次数</li>
+                                 <li><strong>长时间GC：</strong>超过阈值的GC</li>
+                                 <li><strong>GC失败：</strong>并发GC失败次数</li>
+                                 <li><strong>内存碎片：</strong>无法分配的空闲内存</li>
+                             </ul>
+                         </div>
+                     </div>
+                 </div>
+                 
+                 <div class="demo-section">
+                     <h3><i class="fas fa-tools"></i> 监控工具介绍</h3>
+                     <div class="code-block">
+# 命令行工具
+jstat -gc <pid> 1s                    # 每秒显示GC统计信息
+jstat -gccapacity <pid>               # 显示各代内存容量
+jstat -gcutil <pid> 1s                # 显示GC使用率统计
+jmap -histo <pid>                     # 显示堆中对象统计
+jmap -dump:format=b,file=heap.hprof <pid>  # 生成堆转储
+
+# 可视化工具
+• JVisualVM    - Oracle官方监控工具
+• JProfiler    - 商业性能分析工具  
+• MAT          - Eclipse内存分析工具
+• GCViewer     - GC日志分析工具
+• JConsole     - JMX监控控制台
+
+# 在线监控平台
+• AppDynamics  - 应用性能监控
+• New Relic    - 云端监控服务
+• Datadog      - 基础设施监控
+• Prometheus   - 开源监控系统
+                     </div>
+                 </div>
+                 
+                 <div class="demo-section">
+                     <h3><i class="fas fa-chart-bar"></i> GC日志分析实例</h3>
+                     <div class="code-block">
+# G1 GC日志示例
+2023-10-15T10:30:45.123+0800: [GC pause (G1 Evacuation Pause) (young)
+ Desired survivor size 16777216 bytes, new threshold 15 (max 15)
+ [Parallel Time: 12.3 ms, GC Workers: 8]
+    [GC Worker Start (ms): Min: 123.4, Avg: 123.5, Max: 123.6, Diff: 0.2]
+    [Ext Root Scanning (ms): Min: 0.1, Avg: 0.2, Max: 0.3, Diff: 0.2]
+    [Update RS (ms): Min: 0.0, Avg: 0.1, Max: 0.2, Diff: 0.2]
+    [Scan RS (ms): Min: 0.0, Avg: 0.0, Max: 0.1, Diff: 0.1]
+    [Code Root Scanning (ms): Min: 0.0, Avg: 0.0, Max: 0.0, Diff: 0.0]
+    [Object Copy (ms): Min: 11.8, Avg: 11.9, Max: 12.0, Diff: 0.2]
+    [Termination (ms): Min: 0.0, Avg: 0.0, Max: 0.0, Diff: 0.0]
+ [Other: 0.8 ms]
+    [Choose CSet: 0.0 ms]
+    [Ref Proc: 0.3 ms]
+    [Ref Enq: 0.0 ms]
+    [Redirty Cards: 0.2 ms]
+    [Humongous Register: 0.0 ms]
+    [Humongous Reclaim: 0.0 ms]
+    [Free CSet: 0.1 ms]
+ [Eden: 256.0M(256.0M)->0.0B(256.0M) Survivors: 0.0B->32.0M(32.0M) Heap: 256.0M(4096.0M)->32.0M(4096.0M)]
+ [Times: user=0.09 sys=0.00, real=0.01 secs]
+
+# 关键信息解读：
+• GC类型：G1 Evacuation Pause (young) - 年轻代回收
+• 停顿时间：real=0.01 secs - 实际停顿10ms
+• 内存变化：Eden从256M降到0，Heap从256M降到32M
+• 并行度：8个GC工作线程，平均耗时12.3ms
+                     </div>
+                 </div>
+                 
+                 <div class="demo-section">
+                     <h3><i class="fas fa-bell"></i> 监控告警策略</h3>
+                     <div class="collector-grid">
+                         <div class="collector-card">
+                             <h4><i class="fas fa-stopwatch"></i> 延迟告警</h4>
+                             <ul>
+                                 <li>单次GC停顿 > 100ms</li>
+                                 <li>99%分位延迟 > 50ms</li>
+                                 <li>平均GC停顿时间增长 > 50%</li>
+                                 <li>连续5次GC停顿 > 阈值</li>
+                             </ul>
+                         </div>
+                         <div class="collector-card">
+                             <h4><i class="fas fa-chart-line"></i> 频率告警</h4>
+                             <ul>
+                                 <li>Minor GC频率 > 10次/分钟</li>
+                                 <li>Major GC频率 > 1次/分钟</li>
+                                 <li>Full GC发生</li>
+                                 <li>GC频率突然增加 > 100%</li>
+                             </ul>
+                         </div>
+                         <div class="collector-card">
+                             <h4><i class="fas fa-memory"></i> 内存告警</h4>
+                             <ul>
+                                 <li>堆使用率 > 85%</li>
+                                 <li>老年代使用率 > 80%</li>
+                                 <li>内存增长率 > 10MB/分钟</li>
+                                 <li>可疑内存泄漏检测</li>
+                             </ul>
+                         </div>
+                         <div class="collector-card">
+                             <h4><i class="fas fa-exclamation-circle"></i> 异常告警</h4>
+                             <ul>
+                                 <li>OutOfMemoryError发生</li>
+                                 <li>GC失败或超时</li>
+                                 <li>应用吞吐量 < 95%</li>
+                                 <li>GC线程CPU使用率 > 30%</li>
+                             </ul>
+                         </div>
+                     </div>
+                 </div>
+             `;
+         }
+         
+         // 点击模态框外部关闭
+         window.onclick = function(event) {
+             const modal = document.getElementById('demoModal');
+             if (event.target == modal) {
+                 closeModal();
+             }
+         }
+         
+         // ESC键关闭模态框
+         document.addEventListener('keydown', function(event) {
+             if (event.key === 'Escape') {
+                 closeModal();
+             }
+         });
+     </script>
+ </body>
+ </html>

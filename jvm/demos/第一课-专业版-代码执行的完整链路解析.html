@@ -1,0 +1,623 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第一课：代码执行的完整链路解析 - 交互式演示</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --warning-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            --dark-color: #2d3748;
+            --light-color: #ffffff;
+            --text-secondary: #718096;
+            --border-color: #e2e8f0;
+            --shadow-light: 0 4px 6px rgba(0, 0, 0, 0.05);
+            --shadow-medium: 0 10px 25px rgba(0, 0, 0, 0.1);
+            --shadow-heavy: 0 20px 40px rgba(0, 0, 0, 0.15);
+            --border-radius: 12px;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--primary-gradient);
+            min-height: 100vh;
+            color: var(--dark-color);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+            color: var(--light-color);
+        }
+
+        .header h1 {
+            font-size: clamp(2rem, 5vw, 3rem);
+            font-weight: 700;
+            margin-bottom: 1rem;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            letter-spacing: -0.02em;
+        }
+
+        .header p {
+            font-size: 1.25rem;
+            opacity: 0.9;
+            max-width: 600px;
+            margin: 0 auto;
+            font-weight: 300;
+        }
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .demo-card {
+            background: var(--light-color);
+            border-radius: var(--border-radius);
+            padding: 2rem;
+            box-shadow: var(--shadow-medium);
+            transition: var(--transition);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .demo-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--primary-gradient);
+        }
+
+        .demo-card:hover {
+            transform: translateY(-8px);
+            box-shadow: var(--shadow-heavy);
+        }
+
+        .demo-card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .demo-card-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: var(--primary-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+            margin-right: 1rem;
+        }
+
+        .demo-card h3 {
+            color: var(--dark-color);
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .demo-card p {
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            font-size: 1rem;
+        }
+
+        .demo-preview {
+            width: 100%;
+            height: 200px;
+            border: 2px solid var(--border-color);
+            border-radius: var(--border-radius);
+            margin-bottom: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            background: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .demo-preview-placeholder {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            text-align: center;
+        }
+
+        .start-demo-btn {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: var(--transition);
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .start-demo-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 2% auto;
+            padding: 0;
+            border-radius: var(--border-radius);
+            width: 95%;
+            height: 90%;
+            position: relative;
+            overflow: hidden;
+            box-shadow: var(--shadow-heavy);
+        }
+
+        .modal-header {
+            background: var(--primary-gradient);
+            color: white;
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .close {
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: var(--transition);
+            padding: 0.5rem;
+            border-radius: 50%;
+        }
+
+        .close:hover {
+            background-color: rgba(255,255,255,0.1);
+        }
+
+        .modal-body {
+            padding: 2rem;
+            height: calc(100% - 80px);
+            overflow-y: auto;
+        }
+
+        .demo-section {
+            margin-bottom: 3rem;
+            padding: 2rem;
+            background: #f8fafc;
+            border-radius: var(--border-radius);
+            border-left: 4px solid #667eea;
+        }
+
+        .demo-section h3 {
+            color: var(--dark-color);
+            margin-bottom: 1rem;
+            font-size: 1.3rem;
+        }
+
+        .code-block {
+            background: #1a202c;
+            color: #e2e8f0;
+            padding: 1.5rem;
+            border-radius: var(--border-radius);
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+
+        .step-indicator {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .step {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+            transition: var(--transition);
+        }
+
+        .step.active {
+            background: var(--primary-gradient);
+            color: white;
+        }
+
+        .step-line {
+            flex: 1;
+            height: 2px;
+            background: var(--border-color);
+        }
+
+        .step-line.active {
+            background: var(--primary-gradient);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .demo-grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+            
+            .modal-content {
+                width: 98%;
+                height: 95%;
+                margin: 1% auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-code"></i> 第一课：代码执行的完整链路解析</h1>
+            <p>深入理解Java程序从源码到执行的完整技术链路</p>
+        </div>
+
+        <div class="demo-grid">
+            <div class="demo-card" onclick="openDemo('compilation')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-file-code"></i>
+                    </div>
+                    <h3>编译过程演示</h3>
+                </div>
+                <p>观察Java源码如何通过javac编译器转换为字节码文件</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-play-circle" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击开始编译演示</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-play"></i>
+                    开始演示
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('bytecode')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-file-alt"></i>
+                    </div>
+                    <h3>字节码分析</h3>
+                </div>
+                <p>深入分析字节码结构，理解常量池和指令集</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-search" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击分析字节码</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-search"></i>
+                    开始分析
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('execution')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-cogs"></i>
+                    </div>
+                    <h3>执行过程可视化</h3>
+                </div>
+                <p>可视化展示JVM如何加载和执行字节码</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-rocket" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击查看执行过程</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-rocket"></i>
+                    开始执行
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('tools')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-tools"></i>
+                    </div>
+                    <h3>工具使用指南</h3>
+                </div>
+                <p>学习使用javac、javap等JDK工具进行代码分析</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-terminal" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击学习工具使用</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-terminal"></i>
+                    学习工具
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框 -->
+    <div id="demoModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">演示标题</h2>
+                <span class="close" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </span>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- 动态内容将在这里加载 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openDemo(demoType) {
+            const modal = document.getElementById('demoModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            
+            let title = '';
+            let content = '';
+            
+            switch(demoType) {
+                case 'compilation':
+                    title = '编译过程演示';
+                    content = getCompilationDemo();
+                    break;
+                case 'bytecode':
+                    title = '字节码分析';
+                    content = getBytecodeDemo();
+                    break;
+                case 'execution':
+                    title = '执行过程可视化';
+                    content = getExecutionDemo();
+                    break;
+                case 'tools':
+                    title = '工具使用指南';
+                    content = getToolsDemo();
+                    break;
+            }
+            
+            modalTitle.textContent = title;
+            modalBody.innerHTML = content;
+            modal.style.display = 'block';
+        }
+        
+        function closeModal() {
+            document.getElementById('demoModal').style.display = 'none';
+        }
+        
+        function getCompilationDemo() {
+            return `
+                <div class="step-indicator">
+                    <div class="step active">1</div>
+                    <div class="step-line active"></div>
+                    <div class="step">2</div>
+                    <div class="step-line"></div>
+                    <div class="step">3</div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-file-code"></i> 源代码</h3>
+                    <p>首先，我们有一个简单的Java源文件：</p>
+                    <div class="code-block">
+public class HelloWorld {
+    public static void main(String[] args) {
+        System.out.println("Hello, World!");
+    }
+}
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-cog"></i> 编译命令</h3>
+                    <p>使用javac编译器将源码编译为字节码：</p>
+                    <div class="code-block">
+$ javac HelloWorld.java
+# 生成 HelloWorld.class 文件
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-file-alt"></i> 字节码文件</h3>
+                    <p>编译后生成的.class文件包含JVM可执行的字节码：</p>
+                    <div class="code-block">
+# 使用 hexdump 查看字节码文件的二进制内容
+$ hexdump -C HelloWorld.class | head -10
+00000000  ca fe ba be 00 00 00 34  00 1d 0a 00 06 00 0f 09
+00000010  00 10 00 11 08 00 12 0a  00 13 00 14 07 00 15 07
+...
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getBytecodeDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-search"></i> 字节码反编译</h3>
+                    <p>使用javap工具分析字节码结构：</p>
+                    <div class="code-block">
+$ javap -c -v HelloWorld
+
+Classfile /path/to/HelloWorld.class
+  Last modified 2024-01-01; size 428 bytes
+  MD5 checksum 1234567890abcdef
+  Compiled from "HelloWorld.java"
+public class HelloWorld
+  minor version: 0
+  major version: 52
+  flags: ACC_PUBLIC, ACC_SUPER
+Constant pool:
+   #1 = Methodref          #6.#15
+   #2 = Fieldref           #16.#17
+   #3 = String             #18
+   #4 = Methodref          #19.#20
+   #5 = Class              #21
+   #6 = Class              #22
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-list"></i> 指令分析</h3>
+                    <p>main方法的字节码指令：</p>
+                    <div class="code-block">
+public static void main(java.lang.String[]);
+    descriptor: ([Ljava/lang/String;)V
+    flags: ACC_PUBLIC, ACC_STATIC
+    Code:
+      stack=2, locals=1, args_size=1
+         0: getstatic     #2  // Field java/lang/System.out:Ljava/io/PrintStream;
+         3: ldc           #3  // String Hello, World!
+         5: invokevirtual #4  // Method java/io/PrintStream.println:(Ljava/lang/String;)V
+         8: return
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getExecutionDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-rocket"></i> JVM执行过程</h3>
+                    <p>JVM执行字节码的详细步骤：</p>
+                    <div class="code-block">
+1. 类加载（Class Loading）
+   - 加载 HelloWorld.class 文件
+   - 验证字节码格式和安全性
+   - 准备类变量的内存空间
+   - 解析符号引用
+
+2. 方法执行（Method Execution）
+   - 创建栈帧（Stack Frame）
+   - 执行字节码指令：
+     * getstatic: 获取System.out静态字段
+     * ldc: 加载常量"Hello, World!"
+     * invokevirtual: 调用println方法
+     * return: 方法返回
+
+3. 内存管理
+   - 堆内存：存储对象实例
+   - 方法区：存储类信息和常量池
+   - 栈内存：存储方法调用和局部变量
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getToolsDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-terminal"></i> 常用JDK工具</h3>
+                    
+                    <h4>1. javac - Java编译器</h4>
+                    <div class="code-block">
+# 基本编译
+javac HelloWorld.java
+
+# 指定输出目录
+javac -d ./classes HelloWorld.java
+
+# 显示详细信息
+javac -verbose HelloWorld.java
+                    </div>
+                    
+                    <h4>2. javap - 字节码反编译器</h4>
+                    <div class="code-block">
+# 显示字节码指令
+javap -c HelloWorld
+
+# 显示详细信息（包括常量池）
+javap -c -v HelloWorld
+
+# 显示私有成员
+javap -c -p HelloWorld
+                    </div>
+                    
+                    <h4>3. java - Java运行时</h4>
+                    <div class="code-block">
+# 运行程序
+java HelloWorld
+
+# 显示类加载信息
+java -verbose:class HelloWorld
+
+# 显示JIT编译信息
+java -XX:+PrintCompilation HelloWorld
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 点击模态框外部关闭
+        window.onclick = function(event) {
+            const modal = document.getElementById('demoModal');
+            if (event.target == modal) {
+                closeModal();
+            }
+        }
+    </script>
+</body>
+</html>

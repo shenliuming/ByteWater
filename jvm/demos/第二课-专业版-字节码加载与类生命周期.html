@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第二课：字节码加载与类生命周期 - 交互式演示</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --warning-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            --dark-color: #2d3748;
+            --light-color: #ffffff;
+            --text-secondary: #718096;
+            --border-color: #e2e8f0;
+            --shadow-light: 0 4px 6px rgba(0, 0, 0, 0.05);
+            --shadow-medium: 0 10px 25px rgba(0, 0, 0, 0.1);
+            --shadow-heavy: 0 20px 40px rgba(0, 0, 0, 0.15);
+            --border-radius: 12px;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--primary-gradient);
+            min-height: 100vh;
+            color: var(--dark-color);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+            color: var(--light-color);
+        }
+
+        .header h1 {
+            font-size: clamp(2rem, 5vw, 3rem);
+            font-weight: 700;
+            margin-bottom: 1rem;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            letter-spacing: -0.02em;
+        }
+
+        .header p {
+            font-size: 1.25rem;
+            opacity: 0.9;
+            max-width: 600px;
+            margin: 0 auto;
+            font-weight: 300;
+        }
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .demo-card {
+            background: var(--light-color);
+            border-radius: var(--border-radius);
+            padding: 2rem;
+            box-shadow: var(--shadow-medium);
+            transition: var(--transition);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .demo-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--primary-gradient);
+        }
+
+        .demo-card:hover {
+            transform: translateY(-8px);
+            box-shadow: var(--shadow-heavy);
+        }
+
+        .demo-card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .demo-card-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: var(--primary-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+            margin-right: 1rem;
+        }
+
+        .demo-card h3 {
+            color: var(--dark-color);
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .demo-card p {
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            font-size: 1rem;
+        }
+
+        .demo-preview {
+            width: 100%;
+            height: 200px;
+            border: 2px solid var(--border-color);
+            border-radius: var(--border-radius);
+            margin-bottom: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            background: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .demo-preview-placeholder {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            text-align: center;
+        }
+
+        .start-demo-btn {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: var(--transition);
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .start-demo-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 2% auto;
+            padding: 0;
+            border-radius: var(--border-radius);
+            width: 95%;
+            height: 90%;
+            position: relative;
+            overflow: hidden;
+            box-shadow: var(--shadow-heavy);
+        }
+
+        .modal-header {
+            background: var(--primary-gradient);
+            color: white;
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .close {
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: var(--transition);
+            padding: 0.5rem;
+            border-radius: 50%;
+        }
+
+        .close:hover {
+            background-color: rgba(255,255,255,0.1);
+        }
+
+        .modal-body {
+            padding: 2rem;
+            height: calc(100% - 80px);
+            overflow-y: auto;
+        }
+
+        .demo-section {
+            margin-bottom: 3rem;
+            padding: 2rem;
+            background: #f8fafc;
+            border-radius: var(--border-radius);
+            border-left: 4px solid #667eea;
+        }
+
+        .demo-section h3 {
+            color: var(--dark-color);
+            margin-bottom: 1rem;
+            font-size: 1.3rem;
+        }
+
+        .code-block {
+            background: #1a202c;
+            color: #e2e8f0;
+            padding: 1.5rem;
+            border-radius: var(--border-radius);
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+
+        .lifecycle-diagram {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+
+        .lifecycle-step {
+            display: flex;
+            align-items: center;
+            padding: 1rem;
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow-light);
+            transition: var(--transition);
+        }
+
+        .lifecycle-step:hover {
+            transform: translateX(8px);
+            box-shadow: var(--shadow-medium);
+        }
+
+        .lifecycle-step-icon {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            background: var(--success-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            margin-right: 1rem;
+            font-size: 1.2rem;
+        }
+
+        .lifecycle-step-content h4 {
+            color: var(--dark-color);
+            margin-bottom: 0.5rem;
+        }
+
+        .lifecycle-step-content p {
+            color: var(--text-secondary);
+            margin: 0;
+        }
+
+        .classloader-hierarchy {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+
+        .classloader-item {
+            padding: 1.5rem;
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow-light);
+            border-left: 4px solid #4facfe;
+        }
+
+        .classloader-item h4 {
+            color: var(--dark-color);
+            margin-bottom: 0.5rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .demo-grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+            
+            .modal-content {
+                width: 98%;
+                height: 95%;
+                margin: 1% auto;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-layer-group"></i> 第二课：字节码加载与类生命周期</h1>
+            <p>深入理解JVM类加载机制与类的完整生命周期</p>
+        </div>
+
+        <div class="demo-grid">
+            <div class="demo-card" onclick="openDemo('classloading')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-upload"></i>
+                    </div>
+                    <h3>类加载过程</h3>
+                </div>
+                <p>可视化展示类加载的完整过程：加载、验证、准备、解析、初始化</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-spinner fa-spin" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击观看类加载过程</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-play"></i>
+                    开始演示
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('classloader')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-sitemap"></i>
+                    </div>
+                    <h3>类加载器层次</h3>
+                </div>
+                <p>理解Bootstrap、Extension、Application类加载器的层次结构和双亲委派机制</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-project-diagram" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击查看类加载器层次</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-sitemap"></i>
+                    查看层次
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('lifecycle')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-recycle"></i>
+                    </div>
+                    <h3>类生命周期</h3>
+                </div>
+                <p>从加载到卸载，完整展示类在JVM中的生命周期管理</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-heartbeat" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击查看生命周期</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-heartbeat"></i>
+                    查看周期
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('verification')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-shield-alt"></i>
+                    </div>
+                    <h3>字节码验证</h3>
+                </div>
+                <p>深入了解JVM如何验证字节码的安全性和正确性</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-check-circle" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击了解验证过程</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-shield-alt"></i>
+                    开始验证
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框 -->
+    <div id="demoModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">演示标题</h2>
+                <span class="close" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </span>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- 动态内容将在这里加载 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openDemo(demoType) {
+            const modal = document.getElementById('demoModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            
+            let title = '';
+            let content = '';
+            
+            switch(demoType) {
+                case 'classloading':
+                    title = '类加载过程演示';
+                    content = getClassLoadingDemo();
+                    break;
+                case 'classloader':
+                    title = '类加载器层次结构';
+                    content = getClassLoaderDemo();
+                    break;
+                case 'lifecycle':
+                    title = '类生命周期管理';
+                    content = getLifecycleDemo();
+                    break;
+                case 'verification':
+                    title = '字节码验证机制';
+                    content = getVerificationDemo();
+                    break;
+            }
+            
+            modalTitle.textContent = title;
+            modalBody.innerHTML = content;
+            modal.style.display = 'block';
+        }
+        
+        function closeModal() {
+            document.getElementById('demoModal').style.display = 'none';
+        }
+        
+        function getClassLoadingDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-upload"></i> 类加载的五个阶段</h3>
+                    <div class="lifecycle-diagram">
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-download"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>1. 加载（Loading）</h4>
+                                <p>通过类的全限定名获取定义此类的二进制字节流，将字节流转换为方法区的运行时数据结构</p>
+                            </div>
+                        </div>
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-check-double"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>2. 验证（Verification）</h4>
+                                <p>确保Class文件的字节流中包含的信息符合当前虚拟机的要求，不会危害虚拟机自身的安全</p>
+                            </div>
+                        </div>
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-cog"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>3. 准备（Preparation）</h4>
+                                <p>为类变量分配内存并设置类变量初始值，这些变量所使用的内存都将在方法区中进行分配</p>
+                            </div>
+                        </div>
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-link"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>4. 解析（Resolution）</h4>
+                                <p>将常量池内的符号引用替换为直接引用的过程</p>
+                            </div>
+                        </div>
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-play"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>5. 初始化（Initialization）</h4>
+                                <p>执行类构造器<clinit>()方法的过程，真正开始执行类中定义的Java程序代码</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-code"></i> 示例代码</h3>
+                    <div class="code-block">
+public class ClassLoadingDemo {
+    // 类变量，在准备阶段分配内存并初始化为0
+    private static int count = 100;
+    
+    // 静态代码块，在初始化阶段执行
+    static {
+        System.out.println("ClassLoadingDemo 静态代码块执行");
+        count = 200;
+    }
+    
+    public static void main(String[] args) {
+        System.out.println("count = " + count);
+    }
+}
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getClassLoaderDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-sitemap"></i> 类加载器层次结构</h3>
+                    <div class="classloader-hierarchy">
+                        <div class="classloader-item">
+                            <h4><i class="fas fa-crown"></i> Bootstrap ClassLoader（启动类加载器）</h4>
+                            <p>负责加载Java核心类库（如rt.jar中的类），由C++实现，是虚拟机自身的一部分</p>
+                            <div class="code-block">
+// 加载的类库路径
+$JAVA_HOME/jre/lib/rt.jar
+$JAVA_HOME/jre/lib/resources.jar
+$JAVA_HOME/jre/lib/charsets.jar
+                            </div>
+                        </div>
+                        <div class="classloader-item">
+                            <h4><i class="fas fa-puzzle-piece"></i> Extension ClassLoader（扩展类加载器）</h4>
+                            <p>负责加载Java扩展库，默认加载$JAVA_HOME/jre/lib/ext/目录中的所有jar包</p>
+                            <div class="code-block">
+// 加载的类库路径
+$JAVA_HOME/jre/lib/ext/*.jar
+-Djava.ext.dirs指定的目录
+                            </div>
+                        </div>
+                        <div class="classloader-item">
+                            <h4><i class="fas fa-user"></i> Application ClassLoader（应用程序类加载器）</h4>
+                            <p>负责加载用户类路径（ClassPath）上所指定的类库，是程序中默认的类加载器</p>
+                            <div class="code-block">
+// 加载的类库路径
+-classpath或-cp指定的路径
+$CLASSPATH环境变量指定的路径
+当前目录(.)
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-users"></i> 双亲委派机制</h3>
+                    <p>当一个类加载器收到类加载请求时，它首先不会自己去尝试加载这个类，而是把这个请求委派给父类加载器去完成。</p>
+                    <div class="code-block">
+// 双亲委派模型的工作过程
+1. 应用程序类加载器收到加载请求
+2. 委派给扩展类加载器
+3. 扩展类加载器委派给启动类加载器
+4. 启动类加载器在其搜索范围内查找
+5. 如果找不到，返回给扩展类加载器
+6. 扩展类加载器在其搜索范围内查找
+7. 如果找不到，返回给应用程序类加载器
+8. 应用程序类加载器在其搜索范围内查找
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getLifecycleDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-recycle"></i> 类的完整生命周期</h3>
+                    <div class="lifecycle-diagram">
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-birth"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>加载阶段</h4>
+                                <p>JVM将类的.class文件读入内存，并为之创建一个java.lang.Class对象</p>
+                            </div>
+                        </div>
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-link"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>连接阶段</h4>
+                                <p>包括验证、准备、解析三个子阶段，确保类能够正确地被JVM使用</p>
+                            </div>
+                        </div>
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-play"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>初始化阶段</h4>
+                                <p>执行类构造器<clinit>()方法，完成类变量的初始化和静态代码块的执行</p>
+                            </div>
+                        </div>
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-running"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>使用阶段</h4>
+                                <p>类被正常使用，可以创建实例、调用方法、访问字段等</p>
+                            </div>
+                        </div>
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-trash"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>卸载阶段</h4>
+                                <p>当类不再被使用时，JVM可能会卸载该类以释放内存空间</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-code"></i> 类初始化时机</h3>
+                    <p>以下情况会触发类的初始化：</p>
+                    <div class="code-block">
+1. 遇到new、getstatic、putstatic或invokestatic这4条字节码指令时
+2. 使用java.lang.reflect包的方法对类进行反射调用时
+3. 当初始化一个类时，如果其父类还没有进行过初始化，则需要先触发其父类的初始化
+4. 当虚拟机启动时，用户需要指定一个要执行的主类（包含main()方法的那个类）
+5. 当使用JDK 1.7的动态语言支持时，如果一个java.lang.invoke.MethodHandle实例最后的解析结果REF_getStatic、REF_putStatic、REF_invokeStatic的方法句柄
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getVerificationDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-shield-alt"></i> 字节码验证的四个阶段</h3>
+                    <div class="lifecycle-diagram">
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-file-code"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>文件格式验证</h4>
+                                <p>验证字节流是否符合Class文件格式的规范，如魔数、版本号等</p>
+                            </div>
+                        </div>
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-search"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>元数据验证</h4>
+                                <p>对字节码描述的信息进行语义分析，确保符合Java语言规范</p>
+                            </div>
+                        </div>
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-code"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>字节码验证</h4>
+                                <p>通过数据流和控制流分析，确定程序语义是合法的、符合逻辑的</p>
+                            </div>
+                        </div>
+                        <div class="lifecycle-step">
+                            <div class="lifecycle-step-icon">
+                                <i class="fas fa-link"></i>
+                            </div>
+                            <div class="lifecycle-step-content">
+                                <h4>符号引用验证</h4>
+                                <p>确保解析动作能正确执行，验证符号引用的正确性</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-exclamation-triangle"></i> 验证失败的常见情况</h3>
+                    <div class="code-block">
+// 1. 文件格式验证失败
+java.lang.ClassFormatError: Incompatible magic value
+
+// 2. 元数据验证失败
+java.lang.VerifyError: class overrides final method
+
+// 3. 字节码验证失败
+java.lang.VerifyError: Expecting to find object/array on stack
+
+// 4. 符号引用验证失败
+java.lang.NoSuchMethodError: Method not found
+java.lang.NoSuchFieldError: Field not found
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-tools"></i> 验证相关的JVM参数</h3>
+                    <div class="code-block">
+# 关闭字节码验证（不推荐在生产环境使用）
+-Xverify:none
+
+# 开启详细的类加载信息
+-verbose:class
+
+# 开启详细的验证信息
+-XX:+TraceClassLoading
+-XX:+TraceClassResolution
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 点击模态框外部关闭
+        window.onclick = function(event) {
+            const modal = document.getElementById('demoModal');
+            if (event.target == modal) {
+                closeModal();
+            }
+        }
+    </script>
+</body>
+</html>

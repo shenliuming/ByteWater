@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第三课：JVM内存数据区深度解析 - 交互式演示</title>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <style>
+        :root {
+            --primary-gradient: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            --secondary-gradient: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            --success-gradient: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+            --warning-gradient: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+            --danger-gradient: linear-gradient(135deg, #fa709a 0%, #fee140 100%);
+            --dark-color: #2d3748;
+            --light-color: #ffffff;
+            --text-secondary: #718096;
+            --border-color: #e2e8f0;
+            --shadow-light: 0 4px 6px rgba(0, 0, 0, 0.05);
+            --shadow-medium: 0 10px 25px rgba(0, 0, 0, 0.1);
+            --shadow-heavy: 0 20px 40px rgba(0, 0, 0, 0.15);
+            --border-radius: 12px;
+            --transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--primary-gradient);
+            min-height: 100vh;
+            color: var(--dark-color);
+            line-height: 1.6;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 3rem;
+            color: var(--light-color);
+        }
+
+        .header h1 {
+            font-size: clamp(2rem, 5vw, 3rem);
+            font-weight: 700;
+            margin-bottom: 1rem;
+            text-shadow: 0 4px 8px rgba(0,0,0,0.2);
+            letter-spacing: -0.02em;
+        }
+
+        .header p {
+            font-size: 1.25rem;
+            opacity: 0.9;
+            max-width: 600px;
+            margin: 0 auto;
+            font-weight: 300;
+        }
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 2rem;
+            margin-bottom: 3rem;
+        }
+
+        .demo-card {
+            background: var(--light-color);
+            border-radius: var(--border-radius);
+            padding: 2rem;
+            box-shadow: var(--shadow-medium);
+            transition: var(--transition);
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .demo-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 4px;
+            background: var(--primary-gradient);
+        }
+
+        .demo-card:hover {
+            transform: translateY(-8px);
+            box-shadow: var(--shadow-heavy);
+        }
+
+        .demo-card-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .demo-card-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            background: var(--primary-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-size: 1.5rem;
+            margin-right: 1rem;
+        }
+
+        .demo-card h3 {
+            color: var(--dark-color);
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0;
+        }
+
+        .demo-card p {
+            color: var(--text-secondary);
+            margin-bottom: 2rem;
+            font-size: 1rem;
+        }
+
+        .demo-preview {
+            width: 100%;
+            height: 200px;
+            border: 2px solid var(--border-color);
+            border-radius: var(--border-radius);
+            margin-bottom: 1.5rem;
+            position: relative;
+            overflow: hidden;
+            background: #f8fafc;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .demo-preview-placeholder {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+            text-align: center;
+        }
+
+        .start-demo-btn {
+            background: var(--primary-gradient);
+            color: white;
+            border: none;
+            padding: 1rem 2rem;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: var(--transition);
+            width: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 0.5rem;
+        }
+
+        .start-demo-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0,0,0,0.8);
+            backdrop-filter: blur(4px);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 2% auto;
+            padding: 0;
+            border-radius: var(--border-radius);
+            width: 95%;
+            height: 90%;
+            position: relative;
+            overflow: hidden;
+            box-shadow: var(--shadow-heavy);
+        }
+
+        .modal-header {
+            background: var(--primary-gradient);
+            color: white;
+            padding: 1.5rem 2rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5rem;
+            font-weight: 600;
+        }
+
+        .close {
+            color: white;
+            font-size: 1.5rem;
+            cursor: pointer;
+            transition: var(--transition);
+            padding: 0.5rem;
+            border-radius: 50%;
+        }
+
+        .close:hover {
+            background-color: rgba(255,255,255,0.1);
+        }
+
+        .modal-body {
+            padding: 2rem;
+            height: calc(100% - 80px);
+            overflow-y: auto;
+        }
+
+        .demo-section {
+            margin-bottom: 3rem;
+            padding: 2rem;
+            background: #f8fafc;
+            border-radius: var(--border-radius);
+            border-left: 4px solid #667eea;
+        }
+
+        .demo-section h3 {
+            color: var(--dark-color);
+            margin-bottom: 1rem;
+            font-size: 1.3rem;
+        }
+
+        .code-block {
+            background: #1a202c;
+            color: #e2e8f0;
+            padding: 1.5rem;
+            border-radius: var(--border-radius);
+            font-family: 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            overflow-x: auto;
+            margin: 1rem 0;
+        }
+
+        .memory-diagram {
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            margin: 2rem 0;
+        }
+
+        .memory-area {
+            display: flex;
+            align-items: center;
+            padding: 1.5rem;
+            background: white;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow-light);
+            transition: var(--transition);
+            border-left: 4px solid #4facfe;
+        }
+
+        .memory-area:hover {
+            transform: translateX(8px);
+            box-shadow: var(--shadow-medium);
+        }
+
+        .memory-area-icon {
+            width: 50px;
+            height: 50px;
+            border-radius: 12px;
+            background: var(--success-gradient);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            margin-right: 1.5rem;
+            font-size: 1.5rem;
+        }
+
+        .memory-area-content h4 {
+            color: var(--dark-color);
+            margin-bottom: 0.5rem;
+            font-size: 1.2rem;
+        }
+
+        .memory-area-content p {
+            color: var(--text-secondary);
+            margin: 0;
+            line-height: 1.5;
+        }
+
+        .memory-layout {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+            margin: 2rem 0;
+        }
+
+        .memory-region {
+            background: white;
+            border-radius: var(--border-radius);
+            padding: 1.5rem;
+            box-shadow: var(--shadow-light);
+            border-top: 4px solid #667eea;
+        }
+
+        .memory-region h4 {
+            color: var(--dark-color);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .memory-region ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .memory-region li {
+            padding: 0.5rem 0;
+            border-bottom: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .memory-region li:last-child {
+            border-bottom: none;
+        }
+
+        .memory-region li::before {
+            content: '▸';
+            color: #667eea;
+            margin-right: 0.5rem;
+        }
+
+        .gc-visualization {
+            background: white;
+            border-radius: var(--border-radius);
+            padding: 2rem;
+            margin: 2rem 0;
+            box-shadow: var(--shadow-light);
+        }
+
+        .gc-generation {
+            margin-bottom: 2rem;
+            padding: 1.5rem;
+            border-radius: var(--border-radius);
+            border: 2px solid var(--border-color);
+        }
+
+        .gc-generation h4 {
+            color: var(--dark-color);
+            margin-bottom: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .gc-generation.young {
+            border-color: #48bb78;
+            background: rgba(72, 187, 120, 0.05);
+        }
+
+        .gc-generation.old {
+            border-color: #ed8936;
+            background: rgba(237, 137, 54, 0.05);
+        }
+
+        .gc-generation.metaspace {
+            border-color: #805ad5;
+            background: rgba(128, 90, 213, 0.05);
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 1rem;
+            }
+            
+            .demo-grid {
+                grid-template-columns: 1fr;
+                gap: 1.5rem;
+            }
+            
+            .modal-content {
+                width: 98%;
+                height: 95%;
+                margin: 1% auto;
+            }
+            
+            .memory-layout {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-memory"></i> 第三课：JVM内存数据区深度解析</h1>
+            <p>深入理解JVM运行时数据区的设计原理与实现机制</p>
+        </div>
+
+        <div class="demo-grid">
+            <div class="demo-card" onclick="openDemo('memory-areas')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-layer-group"></i>
+                    </div>
+                    <h3>内存区域划分</h3>
+                </div>
+                <p>详细了解JVM运行时数据区的各个组成部分：堆、栈、方法区等</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-sitemap" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击查看内存区域</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-layer-group"></i>
+                    查看区域
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('heap-structure')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-cubes"></i>
+                    </div>
+                    <h3>堆内存结构</h3>
+                </div>
+                <p>深入理解Java堆的分代结构：新生代、老年代的设计原理</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-chart-pie" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击查看堆结构</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-cubes"></i>
+                    查看堆结构
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('stack-frame')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-layer-group"></i>
+                    </div>
+                    <h3>栈帧结构</h3>
+                </div>
+                <p>理解虚拟机栈中栈帧的组成：局部变量表、操作数栈、动态链接等</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-bars" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击查看栈帧</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-bars"></i>
+                    查看栈帧
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('method-area')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-database"></i>
+                    </div>
+                    <h3>方法区与元空间</h3>
+                </div>
+                <p>了解方法区的演进历史，从永久代到元空间的变化</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-archive" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击了解方法区</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-database"></i>
+                    了解方法区
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('gc-areas')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-recycle"></i>
+                    </div>
+                    <h3>垃圾收集区域</h3>
+                </div>
+                <p>理解不同内存区域的垃圾收集特点和策略</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-trash-restore" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击了解GC区域</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-recycle"></i>
+                    了解GC
+                </button>
+            </div>
+
+            <div class="demo-card" onclick="openDemo('memory-params')">
+                <div class="demo-card-header">
+                    <div class="demo-card-icon">
+                        <i class="fas fa-sliders-h"></i>
+                    </div>
+                    <h3>内存参数调优</h3>
+                </div>
+                <p>掌握JVM内存相关参数的配置和调优技巧</p>
+                <div class="demo-preview">
+                    <div class="demo-preview-placeholder">
+                        <i class="fas fa-cogs" style="font-size: 3rem; color: #667eea;"></i>
+                        <div>点击学习调优</div>
+                    </div>
+                </div>
+                <button class="start-demo-btn">
+                    <i class="fas fa-sliders-h"></i>
+                    学习调优
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框 -->
+    <div id="demoModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">演示标题</h2>
+                <span class="close" onclick="closeModal()">
+                    <i class="fas fa-times"></i>
+                </span>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- 动态内容将在这里加载 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openDemo(demoType) {
+            const modal = document.getElementById('demoModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            
+            let title = '';
+            let content = '';
+            
+            switch(demoType) {
+                case 'memory-areas':
+                    title = 'JVM内存区域划分';
+                    content = getMemoryAreasDemo();
+                    break;
+                case 'heap-structure':
+                    title = 'Java堆内存结构';
+                    content = getHeapStructureDemo();
+                    break;
+                case 'stack-frame':
+                    title = '虚拟机栈帧结构';
+                    content = getStackFrameDemo();
+                    break;
+                case 'method-area':
+                    title = '方法区与元空间';
+                    content = getMethodAreaDemo();
+                    break;
+                case 'gc-areas':
+                    title = '垃圾收集区域';
+                    content = getGCAreasDemo();
+                    break;
+                case 'memory-params':
+                    title = '内存参数调优';
+                    content = getMemoryParamsDemo();
+                    break;
+            }
+            
+            modalTitle.textContent = title;
+            modalBody.innerHTML = content;
+            modal.style.display = 'block';
+        }
+        
+        function closeModal() {
+            document.getElementById('demoModal').style.display = 'none';
+        }
+        
+        function getMemoryAreasDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-layer-group"></i> JVM运行时数据区</h3>
+                    <div class="memory-diagram">
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-cubes"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>Java堆（Heap）</h4>
+                                <p>存储对象实例和数组，是垃圾收集器管理的主要区域。分为新生代和老年代。</p>
+                            </div>
+                        </div>
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-layer-group"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>虚拟机栈（VM Stack）</h4>
+                                <p>每个线程私有，存储局部变量、操作数栈、动态链接、方法出口等信息。</p>
+                            </div>
+                        </div>
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-database"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>方法区（Method Area）</h4>
+                                <p>存储类信息、常量、静态变量、即时编译器编译后的代码等数据。</p>
+                            </div>
+                        </div>
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-microchip"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>程序计数器（PC Register）</h4>
+                                <p>当前线程执行的字节码的行号指示器，线程私有，不会发生OutOfMemoryError。</p>
+                            </div>
+                        </div>
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-code"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>本地方法栈（Native Method Stack）</h4>
+                                <p>为虚拟机使用到的Native方法服务，与虚拟机栈作用类似。</p>
+                            </div>
+                        </div>
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-bolt"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>直接内存（Direct Memory）</h4>
+                                <p>不是JVM运行时数据区的一部分，但被频繁使用，如NIO操作。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-users"></i> 线程共享与私有</h3>
+                    <div class="memory-layout">
+                        <div class="memory-region">
+                            <h4><i class="fas fa-share-alt"></i> 线程共享区域</h4>
+                            <ul>
+                                <li>Java堆（Heap）</li>
+                                <li>方法区（Method Area）</li>
+                                <li>直接内存（Direct Memory）</li>
+                            </ul>
+                        </div>
+                        <div class="memory-region">
+                            <h4><i class="fas fa-user"></i> 线程私有区域</h4>
+                            <ul>
+                                <li>虚拟机栈（VM Stack）</li>
+                                <li>本地方法栈（Native Method Stack）</li>
+                                <li>程序计数器（PC Register）</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-exclamation-triangle"></i> 内存异常情况</h3>
+                    <div class="code-block">
+// 堆内存溢出
+java.lang.OutOfMemoryError: Java heap space
+
+// 虚拟机栈溢出
+java.lang.StackOverflowError
+
+// 方法区溢出（JDK 8之前）
+java.lang.OutOfMemoryError: PermGen space
+
+// 元空间溢出（JDK 8及以后）
+java.lang.OutOfMemoryError: Metaspace
+
+// 直接内存溢出
+java.lang.OutOfMemoryError: Direct buffer memory
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getHeapStructureDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-cubes"></i> Java堆的分代结构</h3>
+                    <div class="gc-visualization">
+                        <div class="gc-generation young">
+                            <h4><i class="fas fa-seedling"></i> 新生代（Young Generation）</h4>
+                            <p>新创建的对象首先分配在新生代，包含Eden区和两个Survivor区（S0、S1）。</p>
+                            <div class="memory-layout">
+                                <div class="memory-region">
+                                    <h4>Eden区</h4>
+                                    <ul>
+                                        <li>新对象分配的主要区域</li>
+                                        <li>占新生代的80%（默认）</li>
+                                        <li>Eden区满时触发Minor GC</li>
+                                    </ul>
+                                </div>
+                                <div class="memory-region">
+                                    <h4>Survivor区（S0、S1）</h4>
+                                    <ul>
+                                        <li>存放经过一次GC后存活的对象</li>
+                                        <li>两个区域轮流使用</li>
+                                        <li>各占新生代的10%（默认）</li>
+                                    </ul>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="gc-generation old">
+                            <h4><i class="fas fa-tree"></i> 老年代（Old Generation）</h4>
+                            <p>长期存活的对象会被移动到老年代，老年代满时触发Major GC或Full GC。</p>
+                            <ul>
+                                <li>存放长期存活的对象</li>
+                                <li>大对象直接进入老年代</li>
+                                <li>新生代对象经过多次GC后进入老年代</li>
+                                <li>空间较大，GC频率较低但耗时较长</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="gc-generation metaspace">
+                            <h4><i class="fas fa-database"></i> 元空间（Metaspace）- JDK 8+</h4>
+                            <p>替代永久代，存储类的元数据信息，使用本地内存。</p>
+                            <ul>
+                                <li>类的元数据信息</li>
+                                <li>常量池</li>
+                                <li>方法字节码</li>
+                                <li>使用本地内存，不再受堆大小限制</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-chart-line"></i> 对象分配流程</h3>
+                    <div class="code-block">
+1. 新对象优先在Eden区分配
+   ↓
+2. Eden区空间不足时，触发Minor GC
+   ↓
+3. 存活对象移动到Survivor区，年龄+1
+   ↓
+4. Survivor区对象年龄达到阈值（默认15）
+   ↓
+5. 对象晋升到老年代
+   ↓
+6. 老年代空间不足时，触发Major GC
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-cogs"></i> 堆内存相关参数</h3>
+                    <div class="code-block">
+# 设置堆的初始大小
+-Xms512m
+
+# 设置堆的最大大小
+-Xmx2g
+
+# 设置新生代大小
+-Xmn256m
+
+# 设置新生代与老年代的比例（默认1:2）
+-XX:NewRatio=2
+
+# 设置Eden与Survivor的比例（默认8:1:1）
+-XX:SurvivorRatio=8
+
+# 设置对象晋升老年代的年龄阈值
+-XX:MaxTenuringThreshold=15
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getStackFrameDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-layer-group"></i> 虚拟机栈帧结构</h3>
+                    <div class="memory-diagram">
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-table"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>局部变量表（Local Variable Table）</h4>
+                                <p>存放方法参数和方法内定义的局部变量，以变量槽（Slot）为最小单位。</p>
+                            </div>
+                        </div>
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-layer-group"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>操作数栈（Operand Stack）</h4>
+                                <p>用于存放方法执行过程中产生的中间计算结果，也称为表达式栈。</p>
+                            </div>
+                        </div>
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-link"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>动态链接（Dynamic Linking）</h4>
+                                <p>指向运行时常量池中该栈帧所属方法的引用，支持方法调用过程中的动态连接。</p>
+                            </div>
+                        </div>
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-sign-out-alt"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>方法返回地址（Return Address）</h4>
+                                <p>存放调用该方法的PC寄存器的值，方法执行完成后返回到调用点。</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-code"></i> 栈帧示例</h3>
+                    <div class="code-block">
+public class StackFrameDemo {
+    public static void main(String[] args) {
+        int a = 1;
+        int b = 2;
+        int c = add(a, b);
+        System.out.println(c);
+    }
+    
+    public static int add(int x, int y) {
+        int result = x + y;
+        return result;
+    }
+}
+
+// main方法栈帧：
+// 局部变量表：[args, a=1, b=2, c]
+// 操作数栈：用于计算和方法调用
+// 动态链接：指向常量池中的方法引用
+// 返回地址：程序结束
+
+// add方法栈帧：
+// 局部变量表：[x=1, y=2, result=3]
+// 操作数栈：用于加法运算
+// 动态链接：指向常量池
+// 返回地址：main方法中的调用点
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-exclamation-triangle"></i> 栈相关异常</h3>
+                    <div class="code-block">
+// 栈深度溢出（递归调用过深）
+java.lang.StackOverflowError
+
+// 栈内存不足（无法分配新的栈帧）
+java.lang.OutOfMemoryError: unable to create new native thread
+
+// 相关JVM参数
+-Xss256k    // 设置每个线程的栈大小
+-XX:ThreadStackSize=256  // 同上，单位KB
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getMethodAreaDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-database"></i> 方法区的演进历史</h3>
+                    <div class="memory-layout">
+                        <div class="memory-region">
+                            <h4><i class="fas fa-history"></i> 永久代（JDK 8之前）</h4>
+                            <ul>
+                                <li>使用堆内存的一部分</li>
+                                <li>大小受-XX:PermSize和-XX:MaxPermSize限制</li>
+                                <li>容易发生OutOfMemoryError: PermGen space</li>
+                                <li>垃圾收集效率低</li>
+                            </ul>
+                        </div>
+                        <div class="memory-region">
+                            <h4><i class="fas fa-rocket"></i> 元空间（JDK 8+）</h4>
+                            <ul>
+                                <li>使用本地内存（Native Memory）</li>
+                                <li>大小受系统内存限制</li>
+                                <li>自动扩展，减少OOM风险</li>
+                                <li>提高垃圾收集效率</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-archive"></i> 方法区存储内容</h3>
+                    <div class="memory-diagram">
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-file-code"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>类信息</h4>
+                                <p>类的版本、字段、方法、接口等描述信息</p>
+                            </div>
+                        </div>
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-database"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>运行时常量池</h4>
+                                <p>Class文件中常量池表的运行时表示</p>
+                            </div>
+                        </div>
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-code"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>字节码</h4>
+                                <p>方法的字节码指令</p>
+                            </div>
+                        </div>
+                        <div class="memory-area">
+                            <div class="memory-area-icon">
+                                <i class="fas fa-bolt"></i>
+                            </div>
+                            <div class="memory-area-content">
+                                <h4>JIT编译代码</h4>
+                                <p>即时编译器编译后的本地代码</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-cogs"></i> 元空间相关参数</h3>
+                    <div class="code-block">
+# JDK 8之前（永久代）
+-XX:PermSize=64m          # 永久代初始大小
+-XX:MaxPermSize=256m      # 永久代最大大小
+
+# JDK 8及以后（元空间）
+-XX:MetaspaceSize=64m     # 元空间初始大小
+-XX:MaxMetaspaceSize=256m # 元空间最大大小（默认无限制）
+-XX:MinMetaspaceFreeRatio=40  # 最小空闲比例
+-XX:MaxMetaspaceFreeRatio=70  # 最大空闲比例
+
+# 压缩类空间（默认开启）
+-XX:+UseCompressedClassPointers
+-XX:CompressedClassSpaceSize=1g
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getGCAreasDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-recycle"></i> 垃圾收集区域特点</h3>
+                    <div class="gc-visualization">
+                        <div class="gc-generation young">
+                            <h4><i class="fas fa-seedling"></i> 新生代垃圾收集</h4>
+                            <p><strong>Minor GC / Young GC</strong></p>
+                            <ul>
+                                <li>频率高，速度快</li>
+                                <li>采用复制算法</li>
+                                <li>暂停时间短</li>
+                                <li>主要清理Eden区和Survivor区</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="gc-generation old">
+                            <h4><i class="fas fa-tree"></i> 老年代垃圾收集</h4>
+                            <p><strong>Major GC / Old GC</strong></p>
+                            <ul>
+                                <li>频率低，速度慢</li>
+                                <li>采用标记-清除或标记-整理算法</li>
+                                <li>暂停时间长</li>
+                                <li>清理老年代空间</li>
+                            </ul>
+                        </div>
+                        
+                        <div class="gc-generation metaspace">
+                            <h4><i class="fas fa-database"></i> 元空间垃圾收集</h4>
+                            <p><strong>Metaspace GC</strong></p>
+                            <ul>
+                                <li>清理不再使用的类元数据</li>
+                                <li>通常与Full GC一起进行</li>
+                                <li>类卸载时触发</li>
+                                <li>频率很低</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-chart-line"></i> GC类型对比</h3>
+                    <div class="code-block">
+┌─────────────┬──────────────┬──────────────┬──────────────┐
+│    GC类型   │   触发条件   │   影响范围   │   暂停时间   │
+├─────────────┼──────────────┼──────────────┼──────────────┤
+│  Minor GC   │  Eden区满    │    新生代    │     短       │
+├─────────────┼──────────────┼──────────────┼──────────────┤
+│  Major GC   │  老年代满    │    老年代    │     长       │
+├─────────────┼──────────────┼──────────────┼──────────────┤
+│   Full GC   │  整个堆满    │   整个堆     │     最长     │
+└─────────────┴──────────────┴──────────────┴──────────────┘
+
+# GC日志示例
+[GC (Allocation Failure) [PSYoungGen: 65536K->8192K(76288K)] 
+    65536K->8200K(251392K), 0.0058496 secs]
+    
+[Full GC (Ergonomics) [PSYoungGen: 8192K->0K(76288K)] 
+    [ParOldGen: 175104K->183296K(175104K)] 183296K->183296K(251392K), 
+    [Metaspace: 3072K->3072K(1056768K)], 0.0183729 secs]
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-tools"></i> GC调优参数</h3>
+                    <div class="code-block">
+# 选择垃圾收集器
+-XX:+UseSerialGC          # 串行收集器
+-XX:+UseParallelGC        # 并行收集器
+-XX:+UseConcMarkSweepGC   # CMS收集器
+-XX:+UseG1GC              # G1收集器
+-XX:+UseZGC               # ZGC收集器（JDK 11+）
+
+# GC日志
+-XX:+PrintGC              # 打印GC信息
+-XX:+PrintGCDetails       # 打印GC详细信息
+-XX:+PrintGCTimeStamps    # 打印GC时间戳
+-Xloggc:gc.log           # GC日志文件
+
+# GC调优
+-XX:MaxGCPauseMillis=200  # 最大GC暂停时间
+-XX:GCTimeRatio=99        # GC时间占比
+                    </div>
+                </div>
+            `;
+        }
+        
+        function getMemoryParamsDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-sliders-h"></i> 堆内存参数</h3>
+                    <div class="code-block">
+# 基本堆参数
+-Xms2g                    # 堆初始大小
+-Xmx4g                    # 堆最大大小
+-Xmn1g                    # 新生代大小
+
+# 比例参数
+-XX:NewRatio=2            # 老年代:新生代 = 2:1
+-XX:SurvivorRatio=8       # Eden:Survivor = 8:1
+-XX:MaxTenuringThreshold=15  # 对象晋升年龄阈值
+
+# 大对象参数
+-XX:PretenureSizeThreshold=1m  # 大对象直接进入老年代的阈值
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-layer-group"></i> 栈内存参数</h3>
+                    <div class="code-block">
+# 栈大小设置
+-Xss256k                  # 每个线程栈大小
+-XX:ThreadStackSize=256   # 同上，单位KB
+
+# 示例：不同栈大小的影响
+# 默认栈大小（通常1MB）：支持约1000层方法调用
+# 256KB栈大小：支持约250层方法调用
+# 128KB栈大小：支持约125层方法调用
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-database"></i> 元空间参数</h3>
+                    <div class="code-block">
+# 元空间大小
+-XX:MetaspaceSize=128m    # 元空间初始大小
+-XX:MaxMetaspaceSize=512m # 元空间最大大小
+
+# 压缩类空间
+-XX:+UseCompressedClassPointers     # 启用压缩类指针
+-XX:CompressedClassSpaceSize=1g     # 压缩类空间大小
+
+# 元空间回收
+-XX:MinMetaspaceFreeRatio=40        # 最小空闲比例
+-XX:MaxMetaspaceFreeRatio=70        # 最大空闲比例
+                    </code>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-bolt"></i> 直接内存参数</h3>
+                    <div class="code-block">
+# 直接内存大小限制
+-XX:MaxDirectMemorySize=1g
+
+# NIO相关参数
+-Dsun.nio.MaxDirectMemorySize=1g
+
+# 直接内存使用示例
+ByteBuffer buffer = ByteBuffer.allocateDirect(1024 * 1024); // 1MB直接内存
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-chart-bar"></i> 内存监控参数</h3>
+                    <div class="code-block">
+# 内存使用情况输出
+-XX:+PrintGCDetails       # 详细GC信息
+-XX:+PrintHeapAtGC        # GC前后堆信息
+-XX:+PrintGCApplicationStoppedTime  # 应用暂停时间
+
+# 内存溢出时生成堆转储
+-XX:+HeapDumpOnOutOfMemoryError
+-XX:HeapDumpPath=/path/to/heapdump.hprof
+
+# JVM退出时打印内存使用情况
+-XX:+PrintFlagsFinal      # 打印所有JVM参数
+-XX:+UnlockDiagnosticVMOptions  # 解锁诊断选项
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-wrench"></i> 调优建议</h3>
+                    <div class="memory-layout">
+                        <div class="memory-region">
+                            <h4><i class="fas fa-lightbulb"></i> 堆内存调优</h4>
+                            <ul>
+                                <li>-Xms和-Xmx设置相同值，避免动态扩展</li>
+                                <li>新生代大小设置为堆的1/3到1/4</li>
+                                <li>根据对象存活时间调整晋升阈值</li>
+                                <li>监控GC频率和暂停时间</li>
+                            </ul>
+                        </div>
+                        <div class="memory-region">
+                            <h4><i class="fas fa-tachometer-alt"></i> 性能监控</h4>
+                            <ul>
+                                <li>使用jstat监控GC情况</li>
+                                <li>使用jmap分析堆内存</li>
+                                <li>使用MAT分析堆转储文件</li>
+                                <li>关注内存分配速率</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        // 点击模态框外部关闭
+        window.onclick = function(event) {
+            const modal = document.getElementById('demoModal');
+            if (event.target == modal) {
+                closeModal();
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,1498 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>第六课 - JVM性能监控与调优实战</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+    <style>
+        :root {
+            --primary-color: #2c3e50;
+            --secondary-color: #3498db;
+            --accent-color: #e74c3c;
+            --success-color: #27ae60;
+            --warning-color: #f39c12;
+            --info-color: #17a2b8;
+            --light-bg: #ecf0f1;
+            --dark-bg: #34495e;
+            --text-color: #2c3e50;
+            --border-color: #bdc3c7;
+            --shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --border-radius: 8px;
+            --transition: all 0.3s ease;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: var(--text-color);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            background: rgba(255, 255, 255, 0.95);
+            padding: 30px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            color: var(--primary-color);
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, var(--primary-color), var(--secondary-color));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            font-size: 1.2rem;
+            color: var(--dark-bg);
+            opacity: 0.8;
+        }
+
+        .demo-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 25px;
+            margin-bottom: 30px;
+        }
+
+        .demo-card {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: var(--border-radius);
+            padding: 25px;
+            box-shadow: var(--shadow);
+            transition: var(--transition);
+            border: 2px solid transparent;
+        }
+
+        .demo-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+            border-color: var(--secondary-color);
+        }
+
+        .demo-card h3 {
+            color: var(--primary-color);
+            margin-bottom: 15px;
+            font-size: 1.4rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .demo-card h3 i {
+            color: var(--secondary-color);
+            font-size: 1.2rem;
+        }
+
+        .demo-card p {
+            color: var(--dark-bg);
+            margin-bottom: 20px;
+            line-height: 1.7;
+        }
+
+        .demo-btn {
+            background: linear-gradient(45deg, var(--secondary-color), var(--primary-color));
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 600;
+            transition: var(--transition);
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            text-decoration: none;
+        }
+
+        .demo-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(52, 152, 219, 0.4);
+        }
+
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.8);
+            backdrop-filter: blur(5px);
+        }
+
+        .modal-content {
+            background-color: white;
+            margin: 2% auto;
+            padding: 0;
+            border-radius: var(--border-radius);
+            width: 95%;
+            max-width: 1000px;
+            max-height: 90vh;
+            overflow-y: auto;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            animation: modalSlideIn 0.3s ease-out;
+        }
+
+        @keyframes modalSlideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .modal-header {
+            background: linear-gradient(45deg, var(--primary-color), var(--secondary-color));
+            color: white;
+            padding: 20px 30px;
+            border-radius: var(--border-radius) var(--border-radius) 0 0;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .modal-header h2 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+
+        .close {
+            color: white;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: var(--transition);
+            padding: 5px;
+            border-radius: 50%;
+        }
+
+        .close:hover {
+            background-color: rgba(255, 255, 255, 0.2);
+        }
+
+        .modal-body {
+            padding: 30px;
+            line-height: 1.7;
+        }
+
+        .demo-section {
+            margin-bottom: 30px;
+        }
+
+        .demo-section h3 {
+            color: var(--primary-color);
+            margin-bottom: 20px;
+            font-size: 1.3rem;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid var(--light-bg);
+        }
+
+        .monitor-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .monitor-card {
+            background: var(--light-bg);
+            padding: 20px;
+            border-radius: var(--border-radius);
+            border-left: 4px solid var(--secondary-color);
+            transition: var(--transition);
+        }
+
+        .monitor-card:hover {
+            transform: translateX(5px);
+            box-shadow: var(--shadow);
+        }
+
+        .monitor-card h4 {
+            color: var(--primary-color);
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .monitor-card ul {
+            list-style: none;
+            padding-left: 0;
+        }
+
+        .monitor-card li {
+            padding: 5px 0;
+            position: relative;
+            padding-left: 20px;
+        }
+
+        .monitor-card li:before {
+            content: '▶';
+            position: absolute;
+            left: 0;
+            color: var(--secondary-color);
+            font-size: 0.8rem;
+        }
+
+        .code-block {
+            background: #2d3748;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            overflow-x: auto;
+            margin: 15px 0;
+            border-left: 4px solid var(--secondary-color);
+        }
+
+        .metrics-dashboard {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+
+        .metric-item {
+            background: white;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            text-align: center;
+            box-shadow: var(--shadow);
+            border: 2px solid var(--light-bg);
+            transition: var(--transition);
+        }
+
+        .metric-item:hover {
+            border-color: var(--secondary-color);
+            transform: translateY(-2px);
+        }
+
+        .metric-label {
+            display: block;
+            font-size: 0.9rem;
+            color: var(--dark-bg);
+            margin-bottom: 8px;
+            font-weight: 600;
+        }
+
+        .metric-value {
+            display: block;
+            font-size: 1.8rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .metric-good { color: var(--success-color); }
+        .metric-warning { color: var(--warning-color); }
+        .metric-danger { color: var(--accent-color); }
+
+        .alert-box {
+            padding: 15px 20px;
+            border-radius: var(--border-radius);
+            margin: 20px 0;
+            border-left: 4px solid;
+            font-weight: 500;
+        }
+
+        .alert-info {
+            background-color: #d1ecf1;
+            border-color: var(--info-color);
+            color: #0c5460;
+        }
+
+        .alert-warning {
+            background-color: #fff3cd;
+            border-color: var(--warning-color);
+            color: #856404;
+        }
+
+        .alert-success {
+            background-color: #d4edda;
+            border-color: var(--success-color);
+            color: #155724;
+        }
+
+        .chart-container {
+            background: white;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            margin: 20px 0;
+        }
+
+        .chart-bar {
+            display: flex;
+            align-items: center;
+            margin: 15px 0;
+            gap: 15px;
+        }
+
+        .chart-label {
+            min-width: 120px;
+            font-weight: 600;
+            color: var(--primary-color);
+        }
+
+        .chart-progress {
+            flex: 1;
+            height: 25px;
+            background: var(--light-bg);
+            border-radius: 12px;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .chart-fill {
+            height: 100%;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            padding: 0 10px;
+            color: white;
+            font-size: 0.8rem;
+            font-weight: 600;
+            transition: width 1s ease-in-out;
+        }
+
+        .chart-value {
+            min-width: 60px;
+            text-align: right;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .tool-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .tool-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 25px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+            transition: var(--transition);
+        }
+
+        .tool-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.2);
+        }
+
+        .tool-card h4 {
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .performance-comparison {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin: 20px 0;
+        }
+
+        .before-after {
+            background: white;
+            padding: 20px;
+            border-radius: var(--border-radius);
+            box-shadow: var(--shadow);
+        }
+
+        .before-after.before {
+            border-left: 4px solid var(--accent-color);
+        }
+
+        .before-after.after {
+            border-left: 4px solid var(--success-color);
+        }
+
+        @media (max-width: 768px) {
+            .demo-grid {
+                grid-template-columns: 1fr;
+            }
+            
+            .modal-content {
+                width: 98%;
+                margin: 1% auto;
+            }
+            
+            .performance-comparison {
+                grid-template-columns: 1fr;
+            }
+            
+            .header h1 {
+                font-size: 2rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1><i class="fas fa-chart-line"></i> JVM性能监控与调优实战</h1>
+            <p>掌握专业的JVM性能监控技术，成为调优专家</p>
+        </div>
+
+        <div class="demo-grid">
+            <div class="demo-card">
+                <h3><i class="fas fa-desktop"></i> 监控体系架构</h3>
+                <p>构建完整的JVM监控体系，包括指标收集、数据存储、可视化展示和告警机制的设计与实现。</p>
+                <button class="demo-btn" onclick="openModal('monitoring-system')">
+                    <i class="fas fa-play"></i> 开始演示
+                </button>
+            </div>
+
+            <div class="demo-card">
+                <h3><i class="fas fa-tools"></i> 专业监控工具</h3>
+                <p>深入了解JVisualVM、JProfiler、Eclipse MAT等专业工具的使用技巧和最佳实践。</p>
+                <button class="demo-btn" onclick="openModal('monitoring-tools')">
+                    <i class="fas fa-play"></i> 开始演示
+                </button>
+            </div>
+
+            <div class="demo-card">
+                <h3><i class="fas fa-chart-area"></i> 实时性能分析</h3>
+                <p>学习如何进行实时性能分析，包括GC分析、内存分析、线程分析等关键技术。</p>
+                <button class="demo-btn" onclick="openModal('performance-analysis')">
+                    <i class="fas fa-play"></i> 开始演示
+                </button>
+            </div>
+
+            <div class="demo-card">
+                <h3><i class="fas fa-bug"></i> 调优实战案例</h3>
+                <p>通过真实案例学习内存泄漏、GC停顿、CPU占用等常见问题的诊断和解决方法。</p>
+                <button class="demo-btn" onclick="openModal('tuning-cases')">
+                    <i class="fas fa-play"></i> 开始演示
+                </button>
+            </div>
+
+            <div class="demo-card">
+                <h3><i class="fas fa-bell"></i> 智能告警系统</h3>
+                <p>设计和实现智能告警系统，包括告警规则配置、通知机制和自动化响应策略。</p>
+                <button class="demo-btn" onclick="openModal('alerting-system')">
+                    <i class="fas fa-play"></i> 开始演示
+                </button>
+            </div>
+
+            <div class="demo-card">
+                <h3><i class="fas fa-star"></i> 最佳实践指南</h3>
+                <p>总结JVM监控与调优的最佳实践，包括监控策略、调优流程和团队协作方法。</p>
+                <button class="demo-btn" onclick="openModal('best-practices')">
+                    <i class="fas fa-play"></i> 开始演示
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 模态框 -->
+    <div id="demoModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 id="modalTitle">演示内容</h2>
+                <span class="close" onclick="closeModal()">&times;</span>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <!-- 动态内容将在这里显示 -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        function openModal(demoType) {
+            const modal = document.getElementById('demoModal');
+            const modalTitle = document.getElementById('modalTitle');
+            const modalBody = document.getElementById('modalBody');
+            
+            let title = '';
+            let content = '';
+            
+            switch(demoType) {
+                case 'monitoring-system':
+                    title = '监控体系架构';
+                    content = getMonitoringSystemDemo();
+                    break;
+                case 'monitoring-tools':
+                    title = '专业监控工具';
+                    content = getMonitoringToolsDemo();
+                    break;
+                case 'performance-analysis':
+                    title = '实时性能分析';
+                    content = getPerformanceAnalysisDemo();
+                    break;
+                case 'tuning-cases':
+                    title = '调优实战案例';
+                    content = getTuningCasesDemo();
+                    break;
+                case 'alerting-system':
+                    title = '智能告警系统';
+                    content = getAlertingSystemDemo();
+                    break;
+                case 'best-practices':
+                    title = '最佳实践指南';
+                    content = getBestPracticesDemo();
+                    break;
+            }
+            
+            modalTitle.textContent = title;
+            modalBody.innerHTML = content;
+            modal.style.display = 'block';
+            
+            // 添加动画效果
+            setTimeout(() => {
+                animateCharts();
+            }, 300);
+        }
+        
+        function closeModal() {
+            document.getElementById('demoModal').style.display = 'none';
+        }
+        
+        function animateCharts() {
+            const chartFills = document.querySelectorAll('.chart-fill');
+            chartFills.forEach(fill => {
+                const width = fill.getAttribute('data-width');
+                if (width) {
+                    fill.style.width = width + '%';
+                }
+            });
+        }
+        
+        function getMonitoringSystemDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-sitemap"></i> 监控体系架构</h3>
+                    <div class="monitor-grid">
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-layer-group"></i> 数据收集层</h4>
+                            <ul>
+                                <li>JMX指标收集</li>
+                                <li>应用程序指标</li>
+                                <li>系统资源监控</li>
+                                <li>自定义业务指标</li>
+                                <li>日志数据采集</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-database"></i> 数据存储层</h4>
+                            <ul>
+                                <li>时序数据库(InfluxDB)</li>
+                                <li>Elasticsearch集群</li>
+                                <li>Prometheus存储</li>
+                                <li>数据压缩与归档</li>
+                                <li>高可用配置</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-chart-bar"></i> 可视化层</h4>
+                            <ul>
+                                <li>Grafana仪表板</li>
+                                <li>Kibana日志分析</li>
+                                <li>自定义监控面板</li>
+                                <li>实时数据展示</li>
+                                <li>历史趋势分析</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-bell"></i> 告警通知层</h4>
+                            <ul>
+                                <li>多渠道告警通知</li>
+                                <li>告警规则引擎</li>
+                                <li>告警收敛与降噪</li>
+                                <li>自动化响应</li>
+                                <li>告警统计分析</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-tachometer-alt"></i> 核心监控指标</h3>
+                    <div class="metrics-dashboard">
+                        <div class="metric-item">
+                            <span class="metric-label">堆内存使用率</span>
+                            <span class="metric-value metric-good">68%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">GC停顿时间</span>
+                            <span class="metric-value metric-good">12ms</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">CPU使用率</span>
+                            <span class="metric-value metric-warning">75%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">响应时间P99</span>
+                            <span class="metric-value metric-good">180ms</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">错误率</span>
+                            <span class="metric-value metric-good">0.02%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">吞吐量</span>
+                            <span class="metric-value metric-good">1250 TPS</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-cogs"></i> 监控配置示例</h3>
+                    <div class="code-block">
+# JVM监控参数配置
+-Dcom.sun.management.jmxremote=true
+-Dcom.sun.management.jmxremote.port=9999
+-Dcom.sun.management.jmxremote.authenticate=false
+-Dcom.sun.management.jmxremote.ssl=false
+-Dcom.sun.management.jmxremote.local.only=false
+
+# GC日志配置
+-Xloggc:/var/log/gc.log
+-XX:+PrintGCDetails
+-XX:+PrintGCTimeStamps
+-XX:+PrintGCDateStamps
+-XX:+UseGCLogFileRotation
+-XX:NumberOfGCLogFiles=5
+-XX:GCLogFileSize=100M
+
+# JFR性能记录
+-XX:+FlightRecorder
+-XX:StartFlightRecording=duration=60s,filename=app-profile.jfr
+                    </div>
+                </div>
+                
+                <div class="alert-box alert-info">
+                    <strong>架构要点：</strong> 监控体系需要考虑数据的完整性、实时性和可扩展性，同时要平衡监控开销与监控精度。
+                </div>
+            `;
+        }
+        
+        function getMonitoringToolsDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-toolbox"></i> 专业监控工具对比</h3>
+                    <div class="tool-grid">
+                        <div class="tool-card">
+                            <h4><i class="fas fa-eye"></i> JVisualVM</h4>
+                            <p><strong>特点：</strong> Oracle官方工具，免费易用</p>
+                            <ul>
+                                <li>实时监控CPU、内存、线程</li>
+                                <li>堆转储分析</li>
+                                <li>性能分析和采样</li>
+                                <li>MBean浏览器</li>
+                                <li>插件扩展支持</li>
+                            </ul>
+                        </div>
+                        <div class="tool-card">
+                            <h4><i class="fas fa-microscope"></i> JProfiler</h4>
+                            <p><strong>特点：</strong> 商业工具，功能强大</p>
+                            <ul>
+                                <li>详细的内存分析</li>
+                                <li>CPU热点分析</li>
+                                <li>线程和锁分析</li>
+                                <li>数据库调用分析</li>
+                                <li>集成开发环境支持</li>
+                            </ul>
+                        </div>
+                        <div class="tool-card">
+                            <h4><i class="fas fa-memory"></i> Eclipse MAT</h4>
+                            <p><strong>特点：</strong> 内存分析专家，开源免费</p>
+                            <ul>
+                                <li>堆转储深度分析</li>
+                                <li>内存泄漏检测</li>
+                                <li>对象引用链分析</li>
+                                <li>OQL查询语言</li>
+                                <li>报告生成功能</li>
+                            </ul>
+                        </div>
+                        <div class="tool-card">
+                            <h4><i class="fas fa-terminal"></i> 命令行工具</h4>
+                            <p><strong>特点：</strong> 轻量级，适合生产环境</p>
+                            <ul>
+                                <li>jstat - GC统计信息</li>
+                                <li>jmap - 内存映像工具</li>
+                                <li>jstack - 线程堆栈分析</li>
+                                <li>jinfo - 配置信息查看</li>
+                                <li>jhsdb - 服务性守护进程</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-code"></i> 工具使用示例</h3>
+                    <div class="code-block">
+# jstat - 监控GC情况
+jstat -gc -h10 &lt;pid&gt; 1s
+# 输出说明：
+# S0C/S1C: Survivor区容量
+# S0U/S1U: Survivor区使用量
+# EC: Eden区容量
+# EU: Eden区使用量
+# OC: 老年代容量
+# OU: 老年代使用量
+# MC: 元空间容量
+# MU: 元空间使用量
+# YGC: 年轻代GC次数
+# YGCT: 年轻代GC总时间
+# FGC: Full GC次数
+# FGCT: Full GC总时间
+# GCT: GC总时间
+
+# jmap - 生成堆转储
+jmap -dump:format=b,file=heap.hprof &lt;pid&gt;
+
+# 查看堆内存使用情况
+jmap -histo &lt;pid&gt; | head -20
+
+# jstack - 分析线程状态
+jstack &lt;pid&gt; &gt; thread_dump.txt
+
+# 查找死锁
+jstack &lt;pid&gt; | grep -A 5 -B 5 "Found deadlock"
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-chart-line"></i> 现代化监控平台</h3>
+                    <div class="code-block">
+# Prometheus + Grafana 配置示例
+# prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'jvm-app'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: '/actuator/prometheus'
+    scrape_interval: 5s
+
+# Spring Boot Actuator 配置
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+  endpoint:
+    metrics:
+      enabled: true
+    prometheus:
+      enabled: true
+  metrics:
+    export:
+      prometheus:
+        enabled: true
+                    </div>
+                </div>
+                
+                <div class="alert-box alert-warning">
+                    <strong>工具选择建议：</strong> 开发阶段使用JVisualVM和JProfiler，生产环境使用命令行工具和Prometheus监控，内存问题分析使用Eclipse MAT。
+                </div>
+            `;
+        }
+        
+        function getPerformanceAnalysisDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-chart-area"></i> GC性能分析</h3>
+                    <div class="chart-container">
+                        <h4>GC性能指标趋势</h4>
+                        <div class="chart-bar">
+                            <div class="chart-label">Young GC频率</div>
+                            <div class="chart-progress">
+                                <div class="chart-fill" data-width="45" style="background: #27ae60;">正常: 每分钟2-3次</div>
+                            </div>
+                            <div class="chart-value">良好</div>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-label">Young GC时间</div>
+                            <div class="chart-progress">
+                                <div class="chart-fill" data-width="25" style="background: #27ae60;">平均: 15ms</div>
+                            </div>
+                            <div class="chart-value">优秀</div>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-label">Full GC频率</div>
+                            <div class="chart-progress">
+                                <div class="chart-fill" data-width="10" style="background: #27ae60;">每小时&lt;1次</div>
+                            </div>
+                            <div class="chart-value">优秀</div>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-label">内存回收率</div>
+                            <div class="chart-progress">
+                                <div class="chart-fill" data-width="85" style="background: #27ae60;">85%回收率</div>
+                            </div>
+                            <div class="chart-value">良好</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-memory"></i> 内存分析技术</h3>
+                    <div class="monitor-grid">
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-pie-chart"></i> 堆内存分析</h4>
+                            <ul>
+                                <li>Eden区使用模式分析</li>
+                                <li>Survivor区对象晋升</li>
+                                <li>老年代增长趋势</li>
+                                <li>内存分配速率</li>
+                                <li>对象生命周期分析</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-search"></i> 内存泄漏检测</h4>
+                            <ul>
+                                <li>堆转储对比分析</li>
+                                <li>可疑对象识别</li>
+                                <li>引用链路追踪</li>
+                                <li>内存增长点定位</li>
+                                <li>泄漏根因分析</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-layer-group"></i> 非堆内存监控</h4>
+                            <ul>
+                                <li>元空间使用情况</li>
+                                <li>代码缓存监控</li>
+                                <li>直接内存使用</li>
+                                <li>压缩类空间</li>
+                                <li>本地方法栈</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-clock"></i> 实时监控指标</h4>
+                            <ul>
+                                <li>内存分配速率</li>
+                                <li>GC触发频率</li>
+                                <li>停顿时间分布</li>
+                                <li>内存碎片化程度</li>
+                                <li>并发标记效率</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-code"></i> 分析工具使用</h3>
+                    <div class="code-block">
+# GC日志分析
+# 使用GCViewer分析GC日志
+java -jar gcviewer.jar gc.log
+
+# 使用GCPlot在线分析
+# 上传GC日志到 https://gcplot.com
+
+# 内存分析脚本
+#!/bin/bash
+PID=$1
+echo "开始分析进程 $PID 的内存使用情况..."
+
+# 获取堆内存信息
+echo "=== 堆内存使用情况 ==="
+jmap -heap $PID
+
+# 获取对象统计
+echo "=== 对象实例统计 ==="
+jmap -histo $PID | head -20
+
+# 生成堆转储
+echo "=== 生成堆转储文件 ==="
+TIMESTAMP=$(date +%Y%m%d_%H%M%S)
+jmap -dump:format=b,file=heap_$TIMESTAMP.hprof $PID
+
+# 分析GC情况
+echo "=== GC统计信息 ==="
+jstat -gc $PID
+
+echo "分析完成，堆转储文件：heap_$TIMESTAMP.hprof"
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-brain"></i> 智能分析技巧</h3>
+                    <div class="performance-comparison">
+                        <div class="before-after before">
+                            <h4><i class="fas fa-exclamation-triangle"></i> 问题识别</h4>
+                            <ul>
+                                <li>内存使用率持续上升</li>
+                                <li>GC频率异常增加</li>
+                                <li>响应时间波动较大</li>
+                                <li>CPU使用率不稳定</li>
+                                <li>线程阻塞时间过长</li>
+                            </ul>
+                        </div>
+                        <div class="before-after after">
+                            <h4><i class="fas fa-lightbulb"></i> 分析方法</h4>
+                            <ul>
+                                <li>建立性能基线</li>
+                                <li>多维度数据关联</li>
+                                <li>历史趋势对比</li>
+                                <li>异常点深度分析</li>
+                                <li>根因链路追踪</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="alert-box alert-info">
+                    <strong>分析要点：</strong> 性能分析需要结合业务场景，关注关键指标的变化趋势，避免被单一异常数据误导。
+                </div>
+            `;
+        }
+        
+        function getTuningCasesDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-bug"></i> 经典调优案例</h3>
+                    <div class="monitor-grid">
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-memory"></i> 案例1：内存泄漏问题</h4>
+                            <p><strong>问题现象：</strong></p>
+                            <ul>
+                                <li>应用运行时间越长，响应越慢</li>
+                                <li>堆内存使用率持续上升</li>
+                                <li>频繁发生Full GC</li>
+                                <li>最终出现OutOfMemoryError</li>
+                            </ul>
+                            <p><strong>解决步骤：</strong></p>
+                            <div class="code-block">
+# 1. 生成堆转储文件
+jmap -dump:format=b,file=heap.hprof &lt;pid&gt;
+
+# 2. 使用MAT分析
+# - 查找内存泄漏疑点
+# - 分析对象引用链
+# - 定位问题代码
+
+# 3. 代码修复示例
+// 问题代码
+public class CacheManager {
+    private static Map&lt;String, Object&gt; cache = new HashMap&lt;&gt;();
+    
+    public void addToCache(String key, Object value) {
+        cache.put(key, value); // 永不清理，导致内存泄漏
+    }
+}
+
+// 修复后代码
+public class CacheManager {
+    private static Map&lt;String, Object&gt; cache = new ConcurrentHashMap&lt;&gt;();
+    private static final int MAX_SIZE = 10000;
+    
+    public void addToCache(String key, Object value) {
+        if (cache.size() &gt;= MAX_SIZE) {
+            cache.clear(); // 或使用LRU策略
+        }
+        cache.put(key, value);
+    }
+}
+                            </div>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-clock"></i> 案例2：GC停顿时间过长</h4>
+                            <p><strong>问题现象：</strong></p>
+                            <ul>
+                                <li>应用出现明显的停顿</li>
+                                <li>GC日志显示停顿时间超过1秒</li>
+                                <li>用户体验严重下降</li>
+                                <li>系统吞吐量降低</li>
+                            </ul>
+                            <p><strong>解决方案：</strong></p>
+                            <div class="code-block">
+# 原始配置（问题配置）
+-Xms2g -Xmx8g
+-XX:+UseParallelGC
+-XX:ParallelGCThreads=8
+
+# 优化后配置
+-Xms4g -Xmx4g
+-XX:+UseG1GC
+-XX:MaxGCPauseMillis=200
+-XX:G1HeapRegionSize=16m
+-XX:G1NewSizePercent=30
+-XX:G1MaxNewSizePercent=40
+-XX:G1MixedGCCountTarget=8
+-XX:InitiatingHeapOccupancyPercent=45
+
+# 监控GC效果
+jstat -gc &lt;pid&gt; 1s
+
+# 分析GC日志
+-Xloggc:gc.log
+-XX:+PrintGCDetails
+-XX:+PrintGCTimeStamps
+-XX:+UseGCLogFileRotation
+-XX:NumberOfGCLogFiles=5
+-XX:GCLogFileSize=100M
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-chart-bar"></i> 性能优化效果对比</h3>
+                    <div class="chart-container">
+                        <h4>关键指标改善情况</h4>
+                        <div class="chart-bar">
+                            <div class="chart-label">响应时间P99</div>
+                            <div class="chart-progress">
+                                <div class="chart-fill" data-width="85" style="background: #e74c3c;">优化前: 850ms</div>
+                            </div>
+                            <div class="chart-value">-75%</div>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-label">响应时间P99</div>
+                            <div class="chart-progress">
+                                <div class="chart-fill" data-width="21" style="background: #27ae60;">优化后: 210ms</div>
+                            </div>
+                            <div class="chart-value">✓</div>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-label">GC停顿时间</div>
+                            <div class="chart-progress">
+                                <div class="chart-fill" data-width="90" style="background: #e74c3c;">优化前: 1.2s</div>
+                            </div>
+                            <div class="chart-value">-83%</div>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-label">GC停顿时间</div>
+                            <div class="chart-progress">
+                                <div class="chart-fill" data-width="15" style="background: #27ae60;">优化后: 180ms</div>
+                            </div>
+                            <div class="chart-value">✓</div>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-label">系统吞吐量</div>
+                            <div class="chart-progress">
+                                <div class="chart-fill" data-width="65" style="background: #f39c12;">优化前: 65%</div>
+                            </div>
+                            <div class="chart-value">+46%</div>
+                        </div>
+                        <div class="chart-bar">
+                            <div class="chart-label">系统吞吐量</div>
+                            <div class="chart-progress">
+                                <div class="chart-fill" data-width="95" style="background: #27ae60;">优化后: 95%</div>
+                            </div>
+                            <div class="chart-value">✓</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-list-check"></i> 调优检查清单</h3>
+                    <div class="monitor-grid">
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-memory"></i> 内存调优</h4>
+                            <ul>
+                                <li>合理设置堆大小(-Xms/-Xmx)</li>
+                                <li>选择合适的GC算法</li>
+                                <li>调整新生代比例</li>
+                                <li>优化GC参数</li>
+                                <li>监控内存泄漏</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-microchip"></i> CPU调优</h4>
+                            <ul>
+                                <li>JIT编译器优化</li>
+                                <li>线程池大小调整</li>
+                                <li>减少上下文切换</li>
+                                <li>CPU亲和性设置</li>
+                                <li>热点代码优化</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-database"></i> I/O调优</h4>
+                            <ul>
+                                <li>NIO vs BIO选择</li>
+                                <li>缓冲区大小优化</li>
+                                <li>连接池配置</li>
+                                <li>批量操作优化</li>
+                                <li>异步处理机制</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-code"></i> 应用调优</h4>
+                            <ul>
+                                <li>算法和数据结构优化</li>
+                                <li>缓存策略改进</li>
+                                <li>数据库查询优化</li>
+                                <li>序列化性能提升</li>
+                                <li>业务逻辑优化</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="alert-box alert-warning">
+                    <strong>调优原则：</strong> 先测量，再优化。没有测量就没有优化，盲目的优化可能会带来负面效果。
+                </div>
+            `;
+        }
+        
+        function getAlertingSystemDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-bell"></i> 智能告警架构</h3>
+                    <div class="monitor-grid">
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-chart-line"></i> 指标收集层</h4>
+                            <ul>
+                                <li>JVM内置指标</li>
+                                <li>应用自定义指标</li>
+                                <li>系统资源指标</li>
+                                <li>业务关键指标</li>
+                                <li>第三方服务指标</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-filter"></i> 规则引擎层</h4>
+                            <ul>
+                                <li>阈值告警规则</li>
+                                <li>趋势分析规则</li>
+                                <li>异常检测规则</li>
+                                <li>关联分析规则</li>
+                                <li>智能降噪规则</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-paper-plane"></i> 通知分发层</h4>
+                            <ul>
+                                <li>邮件通知</li>
+                                <li>短信告警</li>
+                                <li>即时消息推送</li>
+                                <li>电话告警</li>
+                                <li>工单系统集成</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-robot"></i> 自动化响应</h4>
+                            <ul>
+                                <li>自动扩容</li>
+                                <li>服务重启</li>
+                                <li>流量切换</li>
+                                <li>资源清理</li>
+                                <li>故障自愈</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-code"></i> 告警规则配置</h3>
+                    <div class="code-block">
+# Prometheus告警规则配置
+groups:
+  - name: jvm-alerts
+    rules:
+      # 堆内存使用率告警
+      - alert: HighHeapMemoryUsage
+        expr: (jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"}) * 100 &gt; 80
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "JVM堆内存使用率过高"
+          description: "{{ $labels.instance }} 堆内存使用率已达到 {{ $value }}%"
+      
+      # GC停顿时间告警
+      - alert: LongGCPause
+        expr: jvm_gc_pause_seconds{quantile="0.99"} &gt; 0.5
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "GC停顿时间过长"
+          description: "{{ $labels.instance }} GC P99停顿时间: {{ $value }}s"
+      
+      # 应用响应时间告警
+      - alert: HighResponseTime
+        expr: http_request_duration_seconds{quantile="0.95"} &gt; 1.0
+        for: 3m
+        labels:
+          severity: warning
+        annotations:
+          summary: "应用响应时间过长"
+          description: "{{ $labels.instance }} P95响应时间: {{ $value }}s"
+
+# AlertManager配置
+global:
+  smtp_smarthost: 'smtp.company.com:587'
+  smtp_from: 'alerts@company.com'
+
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'default'
+  routes:
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+    - match:
+        severity: warning
+      receiver: 'warning-alerts'
+
+receivers:
+  - name: 'default'
+    email_configs:
+      - to: 'team@company.com'
+        subject: '[{{ .Status }}] {{ .GroupLabels.alertname }}'
+        body: |
+          {{ range .Alerts }}
+          告警: {{ .Annotations.summary }}
+          描述: {{ .Annotations.description }}
+          时间: {{ .StartsAt }}
+          {{ end }}
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-brain"></i> 智能告警策略</h3>
+                    <div class="metrics-dashboard">
+                        <div class="metric-item">
+                            <span class="metric-label">告警准确率</span>
+                            <span class="metric-value metric-good">94.2%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">误报率</span>
+                            <span class="metric-value metric-good">5.8%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">平均响应时间</span>
+                            <span class="metric-value metric-good">3.2分钟</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">自动修复率</span>
+                            <span class="metric-value metric-warning">67%</span>
+                        </div>
+                        <div class="metric-item">
+                            <span class="metric-label">告警覆盖率</span>
+                            <span class="metric-value metric-good">98.5%</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="alert-box alert-info">
+                    <strong>智能化建议：</strong> 利用机器学习算法分析历史数据，建立动态阈值和异常检测模型，减少误报提高告警质量。
+                </div>
+            `;
+        }
+        
+        function getBestPracticesDemo() {
+            return `
+                <div class="demo-section">
+                    <h3><i class="fas fa-star"></i> 监控最佳实践</h3>
+                    <div class="monitor-grid">
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-layer-group"></i> 分层监控策略</h4>
+                            <ul>
+                                <li><strong>基础设施层：</strong>CPU、内存、磁盘、网络</li>
+                                <li><strong>平台层：</strong>JVM、容器、中间件</li>
+                                <li><strong>应用层：</strong>接口、服务、业务逻辑</li>
+                                <li><strong>业务层：</strong>用户体验、业务指标</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-bullseye"></i> 关键指标选择</h4>
+                            <ul>
+                                <li><strong>RED指标：</strong>Rate、Errors、Duration</li>
+                                <li><strong>USE指标：</strong>Utilization、Saturation、Errors</li>
+                                <li><strong>四个黄金信号：</strong>延迟、流量、错误、饱和度</li>
+                                <li><strong>SLI/SLO：</strong>服务等级指标和目标</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-clock"></i> 监控时间窗口</h4>
+                            <ul>
+                                <li><strong>实时监控：</strong>1-5秒间隔</li>
+                                <li><strong>短期趋势：</strong>1-15分钟聚合</li>
+                                <li><strong>中期分析：</strong>1小时-1天聚合</li>
+                                <li><strong>长期规划：</strong>周、月、年度报告</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-shield-alt"></i> 告警设计原则</h4>
+                            <ul>
+                                <li><strong>可操作性：</strong>每个告警都应该有明确的处理步骤</li>
+                                <li><strong>相关性：</strong>告警应该与业务影响相关</li>
+                                <li><strong>及时性：</strong>在问题影响用户前发出告警</li>
+                                <li><strong>降噪性：</strong>避免告警风暴和重复告警</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-cogs"></i> 自动化运维流程</h3>
+                    <div class="code-block">
+# 自动化监控脚本
+#!/bin/bash
+# JVM性能自动化监控脚本
+
+APP_NAME="my-java-app"
+PID=$(pgrep -f $APP_NAME)
+LOG_DIR="/var/log/monitoring"
+DATE=$(date +%Y%m%d_%H%M%S)
+
+if [ -z "$PID" ]; then
+    echo "应用进程未找到" | tee -a $LOG_DIR/monitor.log
+    exit 1
+fi
+
+# 检查堆内存使用率
+check_heap_usage() {
+    HEAP_USAGE=$(jstat -gc $PID | tail -1 | awk '{print ($3+$4+$6+$8)/($2+$5+$7)*100}')
+    if (( $(echo "$HEAP_USAGE > 80" | bc -l) )); then
+        echo "[WARN] 堆内存使用率过高: ${HEAP_USAGE}%" | tee -a $LOG_DIR/monitor.log
+        # 发送告警
+        send_alert "堆内存使用率告警" "当前使用率: ${HEAP_USAGE}%"
+    fi
+}
+
+# 检查GC时间
+check_gc_time() {
+    GC_TIME=$(jstat -gc $PID | tail -1 | awk '{print $12}')
+    if (( $(echo "$GC_TIME > 1000" | bc -l) )); then
+        echo "[WARN] GC时间过长: ${GC_TIME}ms" | tee -a $LOG_DIR/monitor.log
+        send_alert "GC性能告警" "GC总时间: ${GC_TIME}ms"
+    fi
+}
+
+# 发送告警
+send_alert() {
+    TITLE=$1
+    MESSAGE=$2
+    # 发送邮件告警
+    echo "$MESSAGE" | mail -s "$TITLE" admin@company.com
+    # 发送到监控系统
+    curl -X POST http://alertmanager:9093/api/v1/alerts \
+         -H "Content-Type: application/json" \
+         -d '[{"labels":{"alertname":"'$TITLE'","severity":"warning"},"annotations":{"description":"'$MESSAGE'"}}]'
+}
+
+# 自动修复
+auto_fix() {
+    echo "[INFO] 尝试自动修复..." | tee -a $LOG_DIR/monitor.log
+    # 清理临时文件
+    find /tmp -name "*.tmp" -mtime +1 -delete
+    # 重启应用（如果需要）
+    # systemctl restart $APP_NAME
+}
+
+# 执行检查
+check_heap_usage
+check_gc_time
+
+echo "[INFO] 监控检查完成 - $DATE" | tee -a $LOG_DIR/monitor.log
+                    </div>
+                </div>
+                
+                <div class="demo-section">
+                    <h3><i class="fas fa-users"></i> 团队能力建设</h3>
+                    <div class="monitor-grid">
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-book"></i> 知识体系</h4>
+                            <ul>
+                                <li>JVM原理深度理解</li>
+                                <li>监控工具熟练使用</li>
+                                <li>性能分析方法论</li>
+                                <li>调优经验积累</li>
+                                <li>故障处理流程</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-handshake"></i> 团队协作</h4>
+                            <ul>
+                                <li>监控责任分工</li>
+                                <li>告警响应机制</li>
+                                <li>知识分享制度</li>
+                                <li>经验文档化</li>
+                                <li>定期技术评审</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-chart-line"></i> 持续改进</h4>
+                            <ul>
+                                <li>监控效果评估</li>
+                                <li>工具链优化</li>
+                                <li>流程持续改进</li>
+                                <li>新技术引入</li>
+                                <li>最佳实践总结</li>
+                            </ul>
+                        </div>
+                        <div class="monitor-card">
+                            <h4><i class="fas fa-trophy"></i> 成功指标</h4>
+                            <ul>
+                                <li>MTTR < 15分钟</li>
+                                <li>MTBF > 30天</li>
+                                <li>可用性SLA > 99.9%</li>
+                                <li>告警准确率 > 95%</li>
+                                <li>自动化覆盖率 > 80%</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="alert-box alert-success">
+                    <strong>持续改进提示：</strong> 监控和调优是一个持续的过程，需要根据业务发展和技术演进不断优化和完善。
+                </div>
+            `;
+        }
+        
+        // 关闭模态框
+        window.onclick = function(event) {
+            const modal = document.getElementById('demoModal');
+            if (event.target === modal) {
+                closeModal();
+            }
+        }
+        
+        // ESC键关闭模态框
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closeModal();
+            }
+        });
+    </script>
+</body>
+</html>
